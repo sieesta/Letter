@@ -115,39 +115,6 @@ export function SetupScreen({
 
   return (
     <div className="setup">
-      <motion.aside
-        className="setup__poster"
-        initial={{ opacity: 0, x: -30 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <div className="setup__posterGlow" />
-        <span className="setup__eyebrow">Memory Lane</span>
-        <h2 className="setup__posterTitle">{draft.hallTitle || 'A Hallway of Us'}</h2>
-        <p className="setup__posterText">
-          {draft.message || 'Every picture you add becomes a print hanging on a string, waiting down the hall.'}
-        </p>
-        <div className="setup__strip">
-          {draft.photos.length ? (
-            draft.photos.slice(0, 4).map((photo, index) => (
-              <motion.img
-                key={photo.id}
-                src={photo.src}
-                alt=""
-                initial={{ opacity: 0, y: 18, rotate: (index - 1.5) * 4 }}
-                animate={{ opacity: 1, y: 0, rotate: (index - 1.5) * 4 }}
-                transition={{ delay: 0.15 * index, duration: 0.7 }}
-              />
-            ))
-          ) : (
-            <div className="setup__stripEmpty">Your prints will hang here</div>
-          )}
-        </div>
-        <span className="setup__posterFoot">
-          {draft.photos.length} {draft.photos.length === 1 ? 'print' : 'prints'} · a song that plays on arrival
-        </span>
-      </motion.aside>
-
       <motion.form
         className="setup__panel"
         onSubmit={handleSubmit}

@@ -10,7 +10,6 @@ import { EnterSequence } from './components/EnterSequence'
 import { Hallway } from './components/hall/Hallway'
 import { MusicDock } from './components/MusicDock'
 import { DesktopModeGate } from './components/DesktopModeGate'
-import { SplashScreen } from './components/SplashScreen'
 import {
   signInAnonymously,
   getCurrentUserId,
@@ -22,14 +21,14 @@ import {
   updatePhotos,
 } from './lib/supabaseService'
 
-type Phase = 'splash' | 'loading' | 'setup' | 'threshold' | 'entering' | 'hall'
+type Phase = 'loading' | 'setup' | 'threshold' | 'entering' | 'hall'
 
 const SLUG_RE = /^\/m\/([a-z0-9-]+)(\/)?$/
 
 export default function App() {
   const engine = useMemo(() => new MusicEngine(), [])
   const music = useMusic(engine)
-  const [phase, setPhase] = useState<Phase>('splash')
+  const [phase, setPhase] = useState<Phase>('setup')
   const [profile, setProfile] = useState<MuseumProfile | null>(null)
   const [volume, setVolume] = useState(() => engine.getVolume())
   const [isPublic, setIsPublic] = useState(false)
@@ -125,10 +124,6 @@ export default function App() {
     startMusic(profile)
     setPhase('entering')
   }, [engine, profile, startMusic])
-
-  const handleSplashEnter = useCallback(() => {
-    setPhase('loading')
-  }, [])
 
   const handleSave = useCallback(
     async (next: MuseumProfile) => {
@@ -239,18 +234,6 @@ export default function App() {
   return (
     <main className="app">
       <AnimatePresence mode="wait">
-        {phase === 'splash' ? (
-          <motion.div
-            key="splash"
-            className="app__screen"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <SplashScreen onEnter={handleSplashEnter} />
-          </motion.div>
-        ) : null}
 
         {phase === 'loading' ? (
           <motion.div key="loading" className="app__boot" exit={{ opacity: 0 }}>

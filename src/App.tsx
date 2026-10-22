@@ -19,6 +19,7 @@ import {
   updateProfile,
   uploadPhoto,
   uploadAudio,
+  updatePhotos,
 } from './lib/supabaseService'
 
 type Phase = 'splash' | 'loading' | 'setup' | 'threshold' | 'entering' | 'hall'
@@ -32,6 +33,7 @@ export default function App() {
   const [profile, setProfile] = useState<MuseumProfile | null>(null)
   const [volume, setVolume] = useState(() => engine.getVolume())
   const [isPublic, setIsPublic] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Detect public share URL: /m/<slug>
   useEffect(() => {
@@ -159,56 +161,64 @@ export default function App() {
       const userId = await getCurrentUserId()
       if (!userId) return
 
-      // Save profile first to get an id
-      const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
-      if (!result) return
-      const profileId = result.id
-      const slug = result.slug
+      try {
+        // Save profile first to get an id
+        const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
+        if (!result) return
+        const profileId = result.id
+        const slug = result.slug
 
-      // Upload photos
-      const uploadedPhotos: MemoryPhoto[] = []
-      for (const file of photoFiles) {
-        const uploaded = await uploadPhoto(userId, profileId, file)
-        if (uploaded) {
-          uploadedPhotos.push({
-            id: crypto.randomUUID(),
-            src: uploaded.publicUrl,
-            caption: '',
-            date: '',
-          })
+        // Upload photos
+        const uploadedPhotos: MemoryPhoto[] = []
+        const dbPhotos: MemoryPhoto[] = []
+        for (const file of photoFiles) {
+          const uploaded = await uploadPhoto(userId, profileId, file)
+          if (uploaded) {
+            const photo: MemoryPhoto = {
+              id: crypto.randomUUID(),
+              src: uploaded.publicUrl,
+              caption: '',
+              date: '',
+            }
+            uploadedPhotos.push(photo)
+            dbPhotos.push({ ...photo, storage_path: uploaded.path } as MemoryPhoto)
+          }
         }
-      }
 
-      // Upload audio
-      let audioUrl = next.audioKey
-      let audioFileName = next.audioFileName
-      if (audioFile) {
-        const uploaded = await uploadAudio(userId, profileId, audioFile)
-        if (uploaded) {
-          audioUrl = uploaded.publicUrl
-          audioFileName = audioFile.name
+        // Upload audio
+        let audioUrl = next.audioKey
+        let audioFileName = next.audioFileName
+        if (audioFile) {
+          const uploaded = await uploadAudio(userId, profileId, audioFile)
+          if (uploaded) {
+            audioUrl = uploaded.publicUrl
+            audioFileName = audioFile.name
+          }
         }
+
+        const finalProfile: MuseumProfile = {
+          ...next,
+          id: profileId,
+          slug,
+          userId,
+          audioKey: audioUrl,
+          audioFileName,
+          photos: [...next.photos, ...uploadedPhotos],
+          updatedAt: Date.now(),
+        }
+
+        // Persist photo storage paths and audio metadata to Supabase
+        await updatePhotos(profileId, [...next.photos, ...dbPhotos])
+        await updateProfile(userId, profileId, {
+          audioKey: audioUrl,
+          audioFileName,
+        })
+
+        setProfile(finalProfile)
+        setPhase(finalProfile.photos.length ? 'threshold' : 'setup')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Save failed')
       }
-
-      const finalProfile: MuseumProfile = {
-        ...next,
-        id: profileId,
-        slug,
-        userId,
-        audioKey: audioUrl,
-        audioFileName,
-        photos: [...next.photos, ...uploadedPhotos],
-        updatedAt: Date.now(),
-      }
-
-      // Persist photo/audio metadata
-      await updateProfile(userId, profileId, {
-        audioKey: audioUrl,
-        audioFileName,
-      })
-
-      setProfile(finalProfile)
-      setPhase(finalProfile.photos.length ? 'threshold' : 'setup')
     },
     [],
   )
@@ -257,6 +267,9 @@ export default function App() {
             exit={{ opacity: 0, filter: 'blur(8px)' }}
             transition={{ duration: 0.5 }}
           >
+            {error ? (
+              <div className="setup__error">{error}</div>
+            ) : null}
             <SetupScreen
               profile={profile}
               onSave={isPublic ? undefined : handleSave}

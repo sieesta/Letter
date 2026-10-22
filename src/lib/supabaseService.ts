@@ -238,15 +238,13 @@ export async function updatePhotos(
   profileId: string,
   photos: MemoryPhoto[],
 ): Promise<void> {
-  // Delete existing photos for this profile (owned by user)
-  await supabase.from('photos').delete().eq('profile_id', profileId).eq('profile_id', profileId)
-  // RLS handles ownership via profiles.user_id
+  await supabase.from('photos').delete().eq('profile_id', profileId)
 
   if (photos.length) {
     await supabase.from('photos').insert(
       photos.map((photo, index) => ({
         profile_id: profileId,
-        storage_path: '', // will be set after upload; photos with data URLs stay client-side
+        storage_path: (photo as { storage_path?: string }).storage_path || '',
         caption: photo.caption || null,
         date: photo.date || null,
         sort_order: index,

@@ -1,14 +1,15 @@
 {
   "name": "memory-lane-hunt",
   "version": "1.0.0",
-  "description": "Romantic memory scavenger hunt website",
+  "description": "A private hallway of photographs hanging on strings, with music that plays on arrival",
   "type": "module",
   "main": "src/main.tsx",
   "scripts": {
     "dev": "vite",
     "dev:lan": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "framer-motion": "^10.18.0",

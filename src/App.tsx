@@ -1,173 +1,165 @@
-import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { UploadStep } from './components/rooms/UploadStep'
-import { IntroStep } from './components/rooms/IntroStep'
-import { FoyerRoom } from './components/rooms/FoyerRoom'
-import { LivingRoomRoom } from './components/rooms/LivingRoomRoom'
-import { KitchenRoom } from './components/rooms/KitchenRoom'
-import { BedroomRoom } from './components/rooms/BedroomRoom'
-import { GarageRoom } from './components/rooms/GarageRoom'
-import { FinaleRoom } from './components/rooms/FinaleRoom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import type { MuseumProfile } from './types'
+import { MusicEngine } from './lib/audioEngine'
+import { useMusic } from './lib/useMusic'
+import { clearProfile, loadProfile, saveProfile } from './lib/idb'
+import { extractVideoId } from './lib/youtube'
+import { SetupScreen } from './components/SetupScreen'
+import { ThresholdScreen } from './components/ThresholdScreen'
+import { EnterSequence } from './components/EnterSequence'
+import { Hallway } from './components/hall/Hallway'
+import { MusicDock } from './components/MusicDock'
 
-const ROOMS = [
-  { id: 'foyer', icon: '🚪', label: 'Welcome' },
-  { id: 'living', icon: '🛋️', label: 'Living' },
-  { id: 'kitchen', icon: '🍳', label: 'Kitchen' },
-  { id: 'bedroom', icon: '🛏️', label: 'Bedroom' },
-  { id: 'garage', icon: '🚗', label: 'Road Trip' },
-  { id: 'finale', icon: '✨', label: 'Finale' },
-]
+type Phase = 'loading' | 'setup' | 'threshold' | 'entering' | 'hall'
 
 export default function App() {
-  const [step, setStep] = useState<'upload' | 'intro' | 'rooms'>('upload')
-  const [profile, setProfile] = useState<{
-    name: string
-    message: string
-    photo: string | null
-  } | null>(null)
-  const [currentRoom, setCurrentRoom] = useState<string>('foyer')
+  const engine = useMemo(() => new MusicEngine(), [])
+  const music = useMusic(engine)
+  const [phase, setPhase] = useState<Phase>('loading')
+  const [profile, setProfile] = useState<MuseumProfile | null>(null)
+  const [volume, setVolume] = useState(() => engine.getVolume())
 
-  // Restore a previously created hunt (so you can preview it again later)
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('memoryLaneProfile')
-      if (saved) {
-        setProfile(JSON.parse(saved))
-        setStep('intro')
-      }
-    } catch {
-      /* ignore malformed storage */
+    let alive = true
+    loadProfile()
+      .then((saved) => {
+        if (!alive) return
+        setProfile(saved)
+        setPhase(saved ? 'threshold' : 'setup')
+      })
+      .catch(() => {
+        if (!alive) return
+        setPhase('setup')
+      })
+    return () => {
+      alive = false
     }
   }, [])
 
-  const handleProfileSave = (data: {
-    name: string
-    message: string
-    photo: string | null
-  }) => {
-    setProfile(data)
-    try {
-      localStorage.setItem('memoryLaneProfile', JSON.stringify(data))
-    } catch {
-      /* storage may be unavailable (private mode / quota) */
-    }
-    setStep('intro')
-  }
+  useEffect(() => () => engine.dispose(), [engine])
 
-  const roomFor = (id: string) => {
-    switch (id) {
-      case 'foyer':
-        return <FoyerRoom name={profile!.name} onComplete={() => setCurrentRoom('living')} />
-      case 'living':
-        return (
-          <LivingRoomRoom name={profile!.name} onComplete={() => setCurrentRoom('kitchen')} />
-        )
-      case 'kitchen':
-        return (
-          <KitchenRoom name={profile!.name} onComplete={() => setCurrentRoom('bedroom')} />
-        )
-      case 'bedroom':
-        return (
-          <BedroomRoom name={profile!.name} onComplete={() => setCurrentRoom('garage')} />
-        )
-      case 'garage':
-        return <GarageRoom name={profile!.name} onComplete={() => setCurrentRoom('finale')} />
-      case 'finale':
-        return (
-          <FinaleRoom
-            name={profile!.name}
-            message={profile!.message}
-            onReset={() => setCurrentRoom('foyer')}
-          />
-        )
-      default:
-        return null
-    }
-  }
+  const startMusic = useCallback(
+    (target: MuseumProfile) => {
+      const videoId = extractVideoId(target.youtubeUrl)
+      if (target.audioKey) {
+        void engine.start({
+          audioKey: target.audioKey,
+          audioFileName: target.audioFileName,
+        })
+        return
+      }
+      if (videoId) {
+        void engine.start({ videoId })
+        return
+      }
+      void engine.start({})
+    },
+    [engine],
+  )
+
+  const handleEnter = useCallback(() => {
+    if (!profile) return
+    // Must happen inside the click so the browser unlocks audio.
+    engine.arm()
+    startMusic(profile)
+    setPhase('entering')
+  }, [engine, profile, startMusic])
+
+  const handleSave = useCallback(
+    async (next: MuseumProfile) => {
+      await saveProfile(next)
+      setProfile(next)
+      setPhase(next.photos.length ? 'threshold' : 'setup')
+    },
+    [],
+  )
+
+  const handleReset = useCallback(async () => {
+    await clearProfile()
+    setProfile(null)
+    setPhase('setup')
+  }, [])
+
+  const handleEdit = useCallback(() => setPhase('setup'), [])
+
+  const handleBackToHall = useCallback(() => {
+    setPhase(profile && profile.photos.length ? 'threshold' : 'setup')
+  }, [profile])
+
+  const musicBusy = music.status === 'downloading' || music.status === 'resolving' || music.status === 'arming'
 
   return (
-    <main className="min-h-screen bg-dusk-50 text-dusk-950 overflow-x-hidden">
+    <main className="app">
       <AnimatePresence mode="wait">
-        {step === 'upload' && (
-          <motion.div
-            key="upload"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 1.04, filter: 'blur(8px)' }}
-            transition={{ duration: 0.5 }}
-            className="min-h-screen flex items-center justify-center px-4 py-8"
-          >
-            <UploadStep onComplete={handleProfileSave} />
+        {phase === 'loading' ? (
+          <motion.div key="loading" className="app__boot" exit={{ opacity: 0 }}>
+            <span className="app__bootDot" />
           </motion.div>
-        )}
+        ) : null}
 
-        {step === 'intro' && profile && (
+        {phase === 'setup' ? (
           <motion.div
-            key="intro"
-            initial={{ opacity: 0, scale: 0.96, filter: 'blur(8px)' }}
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, scale: 1.04, filter: 'blur(8px)' }}
-            transition={{ duration: 0.6 }}
-            className="min-h-screen flex items-center justify-center px-4 py-8"
-          >
-            <IntroStep
-              name={profile.name}
-              message={profile.message}
-              photo={profile.photo}
-              onStart={() => {
-                setStep('rooms')
-                setCurrentRoom('foyer')
-              }}
-            />
-          </motion.div>
-        )}
-
-        {step === 'rooms' && profile && (
-          <motion.div
-            key="rooms"
+            key="setup"
+            className="app__screen"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.6 }}
-            className="min-h-screen flex flex-col items-center px-4 py-8"
+            exit={{ opacity: 0, filter: 'blur(8px)' }}
+            transition={{ duration: 0.5 }}
           >
-            <motion.nav
-              initial={{ opacity: 0, y: -12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
-              className="flex gap-2 sm:gap-3 justify-center mb-8 flex-wrap max-w-3xl"
-            >
-              {ROOMS.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => setCurrentRoom(r.id)}
-                  aria-current={currentRoom === r.id}
-                  className={`px-4 py-2 rounded-full font-medium transition-all duration-300 ${
-                    currentRoom === r.id
-                      ? 'bg-ember-500 text-white shadow-glow-ember scale-105'
-                      : 'bg-white/70 text-dusk-700 hover:bg-white/90 hover:scale-105'
-                  }`}
-                >
-                  <span aria-hidden>{r.icon}</span> {r.label}
-                </button>
-              ))}
-            </motion.nav>
-
-            <div className="w-full max-w-3xl">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={currentRoom}
-                  initial={{ opacity: 0, scale: 0.94, filter: 'blur(12px)', y: 24 }}
-                  animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', y: 0 }}
-                  exit={{ opacity: 0, scale: 1.06, filter: 'blur(12px)', y: -24 }}
-                  transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  {roomFor(currentRoom)}
-                </motion.div>
-              </AnimatePresence>
-            </div>
+            <SetupScreen
+              profile={profile}
+              onSave={handleSave}
+              onCancel={profile ? handleBackToHall : undefined}
+              onReset={handleReset}
+            />
           </motion.div>
-        )}
+        ) : null}
+
+        {phase === 'threshold' && profile ? (
+          <motion.div
+            key="threshold"
+            className="app__screen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, filter: 'blur(8px)' }}
+            transition={{ duration: 0.5 }}
+          >
+            <ThresholdScreen
+              profile={profile}
+              onEnter={handleEnter}
+              onEdit={handleEdit}
+              onReset={handleReset}
+            />
+          </motion.div>
+        ) : null}
+
+        {phase === 'entering' && profile ? (
+          <EnterSequence key="entering" profile={profile} music={music} onDone={() => setPhase('hall')} />
+        ) : null}
+
+        {phase === 'hall' && profile ? (
+          <motion.div
+            key="hall"
+            className="app__screen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.9 }}
+          >
+            <Hallway profile={profile} onEdit={handleEdit} onReset={handleReset} />
+            <MusicDock
+              music={music}
+              volume={volume}
+              onToggle={() => void engine.toggle()}
+              onVolume={(value) => {
+                engine.setVolume(value)
+                setVolume(value)
+              }}
+              onRetry={() => void engine.retry()}
+            />
+            {musicBusy ? <span className="app__buffering" aria-hidden="true" /> : null}
+          </motion.div>
+        ) : null}
       </AnimatePresence>
     </main>
   )

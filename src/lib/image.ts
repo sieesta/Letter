@@ -37,7 +37,7 @@ export function readFileAsBlob(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(new Error('Could not read that audio file'))
-    reader.onload = () => resolve(reader.result as Blob)
+    reader.onload = () => resolve(reader.result as unknown as Blob)
     reader.readAsArrayBuffer(file)
   })
 }

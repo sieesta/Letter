@@ -6,7 +6,13 @@
  *  2. Ask YouTube's InnerTube player endpoint for a *direct* audio-only stream
  *     (`audio/mp4`, itag 140 / 139). Unlike the WEB client, the mobile clients
  *     hand back a plain `url` instead of a `signatureCipher`, so the browser can
- *     stream and cache the audio itself without ever showing a YouTube player.
+ *     stream the audio itself without ever showing a YouTube player.
+ *
+ * Important: InnerTube answers with `access-control-allow-origin: <origin>`, so
+ * the call works from any origin — but YouTube also rate-limits and bot-checks
+ * aggressive clients, in which case it answers `403`. That is why the audio
+ * engine never depends on this alone: the hidden YouTube player is always
+ * started in parallel as a guaranteed fallback.
  */
 
 export interface AudioStream {
@@ -20,9 +26,13 @@ export interface AudioStream {
   expiresInSeconds: number
 }
 
+/** The public key the YouTube web client uses. It only helps the WEB client. */
+const WEB_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
+
 const PLAYER_ENDPOINTS = [
   'https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
-  'https://release-youtubei.sandbox.googleapis.com/youtubei/v1/player?prettyPrint=false',
+  'https://www.youtube-nocookie.com/youtubei/v1/player?prettyPrint=false',
+  'https://music.youtube.com/youtubei/v1/player?prettyPrint=false',
 ]
 
 interface ClientProfile {
@@ -30,6 +40,8 @@ interface ClientProfile {
   label: string
   context: Record<string, unknown>
   headers: Record<string, string>
+  /** Some clients refuse to answer without the public web key. */
+  apiKey?: boolean
 }
 
 const CLIENTS: ClientProfile[] = [
@@ -71,6 +83,24 @@ const CLIENTS: ClientProfile[] = [
     },
   },
   {
+    id: 30,
+    label: 'ANDROID_TESTSUITE',
+    context: {
+      clientName: 'ANDROID_TESTSUITE',
+      clientVersion: '1.9',
+      androidSdkVersion: 30,
+      osName: 'Android',
+      osVersion: '11',
+      hl: 'en',
+      gl: 'US',
+      platform: 'MOBILE',
+    },
+    headers: {
+      'X-YouTube-Client-Name': '30',
+      'X-YouTube-Client-Version': '1.9',
+    },
+  },
+  {
     id: 2,
     label: 'MWEB',
     context: {
@@ -85,19 +115,19 @@ const CLIENTS: ClientProfile[] = [
     },
   },
   {
-    id: 85,
-    label: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+    id: 1,
+    label: 'WEB',
     context: {
-      clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-      clientVersion: '2.0',
+      clientName: 'WEB',
+      clientVersion: '2.20240726.01.00',
       hl: 'en',
       gl: 'US',
-      clientScreen: 'EMBED',
     },
     headers: {
-      'X-YouTube-Client-Name': '85',
-      'X-YouTube-Client-Version': '2.0',
+      'X-YouTube-Client-Name': '1',
+      'X-YouTube-Client-Version': '2.20240726.01.00',
     },
+    apiKey: true,
   },
   {
     id: 67,
@@ -112,6 +142,7 @@ const CLIENTS: ClientProfile[] = [
       'X-YouTube-Client-Name': '67',
       'X-YouTube-Client-Version': '1.20240723.03.00',
     },
+    apiKey: true,
   },
 ]
 
@@ -179,23 +210,29 @@ interface RawPlayerResponse {
   }
 }
 
+/**
+ * Prefer a plain AAC-LC stream inside an MP4 container: every browser can play
+ * it and it is what MediaSource wants when we mirror it into the cache.
+ */
 function pickAudioFormat(formats: RawFormat[]): RawFormat | null {
-  const candidates = formats.filter(
+  const usable = formats.filter(
     (f) =>
       typeof f.mimeType === 'string' &&
-      f.mimeType.startsWith('audio/mp4') &&
       typeof f.url === 'string' &&
       f.url.length > 0,
   )
-  if (!candidates.length) return null
+  if (!usable.length) return null
+
+  const mp4 = usable.filter((f) => (f.mimeType ?? '').startsWith('audio/mp4'))
+  const pool = mp4.length ? mp4 : usable
 
   // itag 140 is 128 kbps AAC-LC — the sweet spot for a background track.
-  const itag140 = candidates.find((f) => f.itag === 140)
+  const itag140 = pool.find((f) => f.itag === 140)
   if (itag140) return itag140
 
-  const progressive = candidates.filter((f) => !f.itag || f.itag === 139)
-  const pool = progressive.length ? progressive : candidates
-  return pool.reduce((best, current) =>
+  const progressive = pool.filter((f) => !f.itag || f.itag === 139)
+  const candidates = progressive.length ? progressive : pool
+  return candidates.reduce((best, current) =>
     (current.bitrate ?? 0) > (best.bitrate ?? 0) ? current : best,
   )
 }
@@ -210,14 +247,49 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Pro
   }
 }
 
-async function queryClient(client: ClientProfile, videoId: string): Promise<RawPlayerResponse | null> {
-  const body = JSON.stringify({
+async function queryClient(
+  client: ClientProfile,
+  videoId: string,
+  budgetMs: number,
+): Promise<RawPlayerResponse | null> {
+  const payload: Record<string, unknown> = {
     videoId,
     contentCheckOk: true,
     racyCheckOk: true,
     context: { client: client.context },
-  })
+  }
+  if (client.apiKey) payload.apiKey = WEB_API_KEY
 
+  const body = JSON.stringify(payload)
+  const perCall = Math.max(1200, Math.min(4000, budgetMs))
+
+  // First try a *simple* request: a text/plain body with no extra headers
+  // needs no CORS preflight, and the preflight is exactly the request
+  // YouTube is most likely to bot-check. The client lives in the body, so
+  // the headers are not needed.
+  for (const endpoint of PLAYER_ENDPOINTS) {
+    try {
+      const response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body,
+          mode: 'cors',
+          credentials: 'omit',
+        },
+        perCall,
+      )
+      if (!response.ok) continue
+      const json = (await response.json()) as RawPlayerResponse
+      if (json && json.playabilityStatus?.status === 'OK') return json
+      if (json && json.streamingData) return json
+    } catch {
+      /* try the next endpoint / client */
+    }
+  }
+
+  // Then the full request, with the client headers and the web api key.
   for (const endpoint of PLAYER_ENDPOINTS) {
     try {
       const response = await fetchWithTimeout(
@@ -226,13 +298,14 @@ async function queryClient(client: ClientProfile, videoId: string): Promise<RawP
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(client.apiKey ? { 'X-Goog-Api-Key': WEB_API_KEY } : {}),
             ...client.headers,
           },
           body,
           mode: 'cors',
           credentials: 'omit',
         },
-        8000,
+        perCall,
       )
       if (!response.ok) continue
       const json = (await response.json()) as RawPlayerResponse
@@ -248,12 +321,23 @@ async function queryClient(client: ClientProfile, videoId: string): Promise<RawP
 /**
  * Resolve a playable, direct audio-only stream for a YouTube video.
  * Returns null when every client is blocked or only ciphered URLs are offered.
+ *
+ * `timeoutMs` is the whole budget for the search: YouTube bot-checks some
+ * origins, and the hidden player is already playing by then.
  */
-export async function resolveAudioStream(videoId: string): Promise<AudioStream | null> {
+export async function resolveAudioStream(
+  videoId: string,
+  timeoutMs = 7000,
+): Promise<AudioStream | null> {
   if (!videoId) return null
 
+  const deadline = Date.now() + timeoutMs
+
   for (const client of CLIENTS) {
-    const json = await queryClient(client, videoId)
+    const remaining = deadline - Date.now()
+    if (remaining <= 400) return null
+
+    const json = await queryClient(client, videoId, remaining)
     if (!json) continue
 
     const streaming = json.streamingData
@@ -261,7 +345,6 @@ export async function resolveAudioStream(videoId: string): Promise<AudioStream |
     const format = pickAudioFormat(formats)
     if (!format?.url) continue
 
-    const durationMs = Number(format.approxDurationMs ?? json.videoDetails?.lengthSeconds ?? 0) || 0
     const durationSec = format.approxDurationMs
       ? Math.round(Number(format.approxDurationMs) / 1000)
       : Number(json.videoDetails?.lengthSeconds ?? 0)
@@ -271,7 +354,7 @@ export async function resolveAudioStream(videoId: string): Promise<AudioStream |
       mimeType: (format.mimeType ?? 'audio/mp4; codecs="mp4a.40.2"').split(';')[0].trim(),
       itag: format.itag ?? 140,
       bitrate: format.bitrate ?? 128000,
-      durationSec: Number.isFinite(durationSec) ? durationSec : durationMs / 1000,
+      durationSec: Number.isFinite(durationSec) ? durationSec : 0,
       contentLength: format.contentLength ? Number(format.contentLength) : null,
       title: json.videoDetails?.title ?? '',
       expiresInSeconds: Number(streaming?.expiresInSeconds ?? 0) || 21600,
@@ -287,6 +370,8 @@ export function codecForItag(itag: number): string[] {
   return ['audio/mp4; codecs="mp4a.40.2"', 'audio/mp4']
 }
 
+/* ------------------------------------------------------------- the player */
+
 let iframeApiPromise: Promise<void> | null = null
 
 /** Loads the YouTube IFrame Player API once, used only as a last-resort fallback. */
@@ -297,7 +382,7 @@ export function loadYouTubeIframeApi(): Promise<void> {
       resolve()
       return
     }
-    const w = window as unknown as { YT?: { Player: unknown }; onYouTubeIframeAPIReady?: () => void }
+    const w = window as unknown as { YT?: { Player?: unknown }; onYouTubeIframeAPIReady?: () => void }
     if (w.YT && typeof w.YT.Player === 'function') {
       resolve()
       return
@@ -316,6 +401,33 @@ export function loadYouTubeIframeApi(): Promise<void> {
     window.setTimeout(() => resolve(), 6000)
   })
   return iframeApiPromise
+}
+
+/** True when the IFrame Player API is on the page and usable. */
+export function hasYouTubeIframeApi(): boolean {
+  if (typeof window === 'undefined') return false
+  const w = window as unknown as { YT?: { Player?: unknown } }
+  return Boolean(w.YT && typeof w.YT.Player === 'function')
+}
+
+/**
+ * A plain embed URL. Used when the player API cannot be loaded — the iframe
+ * still autoplays the audio on its own, we just cannot drive it.
+ */
+export function embedUrl(videoId: string): string {
+  const params = new URLSearchParams({
+    autoplay: '1',
+    playsinline: '1',
+    controls: '0',
+    disablekb: '1',
+    fs: '0',
+    rel: '0',
+    iv_load_policy: '3',
+    modestbranding: '1',
+    enablejsapi: '1',
+    origin: typeof window !== 'undefined' ? window.location.origin : '',
+  })
+  return `https://www.youtube.com/embed/${videoId}?${params.toString()}`
 }
 
 /** True when the browser says it can play the given mime type natively. */

@@ -6,16 +6,43 @@ interface ThresholdScreenProps {
   onEnter: () => void
   onEdit: () => void
   onReset: () => void
+  isPublic?: boolean
+  shareUrl?: string
 }
 
 /** The doorway of the experience: one button, then the hall opens. */
-export function ThresholdScreen({ profile, onEnter, onEdit, onReset }: ThresholdScreenProps) {
+export function ThresholdScreen({ profile, onEnter, onEdit, onReset, isPublic, shareUrl }: ThresholdScreenProps) {
   const preview = profile.photos.slice(0, 5)
 
   return (
     <div className="threshold">
       <div className="threshold__backdrop" />
       <div className="threshold__glow" />
+      <div className="threshold__sparkles" aria-hidden="true">
+        {[...Array(12)].map((_, i) => (
+          <motion.span
+            key={i}
+            className="threshold__sparkle"
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ 
+              opacity: [0, 1, 0], 
+              scale: [0, 1, 0],
+              x: [0, (Math.random() - 0.5) * 100],
+              y: [0, (Math.random() - 0.5) * 100]
+            }}
+            transition={{
+              duration: 2 + Math.random() * 2,
+              repeat: Infinity,
+              delay: i * 0.3,
+              ease: "easeInOut"
+            }}
+            style={{
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+            }}
+          />
+        ))}
+      </div>
 
       <motion.div
         className="threshold__inner"
@@ -63,10 +90,40 @@ export function ThresholdScreen({ profile, onEnter, onEdit, onReset }: Threshold
                 src={photo.src}
                 alt=""
                 initial={{ opacity: 0, y: 26, rotate: (index - (preview.length - 1) / 2) * 5 }}
-                animate={{ opacity: 1, y: 0, rotate: (index - (preview.length - 1) / 2) * 5 }}
-                transition={{ delay: 0.75 + index * 0.09, duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
+                animate={{ 
+                  opacity: 1, 
+                  y: [0, -8, 0], 
+                  rotate: [(index - (preview.length - 1) / 2) * 5, (index - (preview.length - 1) / 2) * 5 + 2, (index - (preview.length - 1) / 2) * 5] 
+                }}
+                transition={{ 
+                  opacity: { delay: 0.75 + index * 0.09, duration: 0.85, ease: [0.22, 1, 0.36, 1] },
+                  y: { delay: 1.5 + index * 0.1, duration: 3, repeat: Infinity, ease: "easeInOut" },
+                  rotate: { delay: 1.5 + index * 0.1, duration: 4, repeat: Infinity, ease: "easeInOut" }
+                }}
               />
             ))}
+          </motion.div>
+        ) : null}
+
+        {isPublic && shareUrl ? (
+          <motion.div
+            className="threshold__share"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1.2, duration: 0.8 }}
+          >
+            <span className="threshold__eyebrow">Share this hallway</span>
+            <div className="threshold__shareRow">
+              <input
+                type="text"
+                value={shareUrl}
+                readOnly
+                className="threshold__shareInput"
+              />
+              <button type="button" className="threshold__copy" onClick={() => copyUrl(shareUrl)}>
+                Copy
+              </button>
+            </div>
           </motion.div>
         ) : null}
 
@@ -79,14 +136,24 @@ export function ThresholdScreen({ profile, onEnter, onEdit, onReset }: Threshold
           <button type="button" className="threshold__enter" onClick={onEnter}>
             Walk in
           </button>
-          <button type="button" className="threshold__link" onClick={onEdit}>
-            Edit the memories
-          </button>
-          <button type="button" className="threshold__link threshold__link--quiet" onClick={onReset}>
-            Start over
-          </button>
+          {!isPublic && (
+            <>
+              <button type="button" className="threshold__link" onClick={onEdit}>
+                Edit the memories
+              </button>
+              <button type="button" className="threshold__link threshold__link--quiet" onClick={onReset}>
+                Start over
+              </button>
+            </>
+          )}
         </motion.div>
       </motion.div>
     </div>
   )
+}
+
+function copyUrl(url: string) {
+  navigator.clipboard.writeText(url).catch(() => {
+    /* clipboard may not be available */
+  })
 }

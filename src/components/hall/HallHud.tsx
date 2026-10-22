@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import type { MuseumProfile } from '../../types'
+import { useTypewriter } from '../../lib/useTypewriter'
 import type { HallLayout } from './geometry'
+import { QuoteCard } from './QuoteCard'
 
 interface HallHudProps {
   profile: MuseumProfile
@@ -94,22 +96,7 @@ export function HallHud({
 
       <AnimatePresence>
         {focusedSlot ? (
-          <motion.div
-            className="hall-caption"
-            key="caption"
-            initial={{ opacity: 0, y: 26, filter: 'blur(6px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, y: 18, filter: 'blur(6px)' }}
-            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-          >
-            {focusedSlot.photo.date ? (
-              <span className="hall-caption__date">{focusedSlot.photo.date}</span>
-            ) : null}
-            <p className="hall-caption__text">{focusedSlot.photo.caption}</p>
-            <button type="button" className="hall-caption__close" onClick={onCloseFocus}>
-              Back to the hall
-            </button>
-          </motion.div>
+          <QuoteCard key="quote" photo={focusedSlot.photo} onClose={onCloseFocus} />
         ) : null}
       </AnimatePresence>
 
@@ -122,7 +109,10 @@ export function HallHud({
             exit={{ opacity: 0, y: 10 }}
             transition={{ delay: 0.9, duration: 0.6 }}
           >
-            Scroll, drag or press <kbd>↑</kbd> to walk · click a picture to linger
+            <span className="hall-hint__fine">
+              Scroll, drag or press <kbd>↑</kbd> to walk · click a picture to linger
+            </span>
+            <span className="hall-hint__coarse">Swipe up or down to walk · tap a picture to linger</span>
           </motion.p>
         ) : null}
       </AnimatePresence>
@@ -143,9 +133,7 @@ export function HallHud({
               transition={{ delay: 0.25, duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
             >
               <span className="hall-finale__eyebrow">The last frame</span>
-              <p className="hall-finale__message">
-                {profile.message || 'Every room we have walked through led back to this one.'}
-              </p>
+              <FinaleMessage message={profile.message} />
               {profile.formLink ? (
                 <a className="hall-finale__cta" href={profile.formLink} target="_blank" rel="noreferrer">
                   Open the letter
@@ -164,5 +152,17 @@ export function HallHud({
         ) : null}
       </AnimatePresence>
     </div>
+  )
+}
+
+/** The last words of the hall, typed out slowly. */
+function FinaleMessage({ message }: { message: string }) {
+  const words = message?.trim() || 'Every room we have walked through led back to this one.'
+  const { visible, done } = useTypewriter(words, { speed: 24, delay: 620 })
+  return (
+    <p className="hall-finale__message">
+      {visible}
+      <span className={`quote__caret${done ? ' is-done' : ''}`} aria-hidden="true" />
+    </p>
   )
 }

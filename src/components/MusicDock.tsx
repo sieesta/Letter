@@ -24,6 +24,20 @@ export function MusicDock({ music, volume, onToggle, onVolume, onRetry }: MusicD
 
   const label = music.status === 'none' ? 'No song' : music.title || 'Our song'
 
+  const statusText = blocked
+    ? 'Tap anywhere to start'
+    : fetching
+      ? `Fetching ${Math.round(music.downloadProgress * 100)}%`
+      : playing
+        ? 'Now playing'
+        : downloading
+          ? 'Finding the song'
+          : music.status === 'paused'
+            ? 'Paused'
+            : music.status === 'none'
+              ? 'Add a song in the setup'
+              : 'Ready'
+
   return (
     <motion.div
       className="dock"
@@ -36,10 +50,11 @@ export function MusicDock({ music, volume, onToggle, onVolume, onRetry }: MusicD
         className={`dock__button${playing ? ' is-playing' : ''}${blocked ? ' is-blocked' : ''}`}
         onClick={blocked ? onRetry : onToggle}
         aria-label={blocked ? 'Start the music' : playing ? 'Pause the music' : 'Play the music'}
+        title={music.error ?? undefined}
       >
         {playing ? (
           <span className="dock__eq" aria-hidden="true">
-            {BARS.map((scale, i) => (
+            {BARS.map((_scale, i) => (
               <span key={i} style={{ animationDelay: `${i * 0.14}s` }} />
             ))}
           </span>
@@ -52,21 +67,7 @@ export function MusicDock({ music, volume, onToggle, onVolume, onRetry }: MusicD
 
       <div className="dock__meta">
         <span className="dock__title">{label}</span>
-        <span className="dock__status">
-          {blocked
-            ? 'Tap to start the music'
-            : fetching
-              ? `Fetching ${Math.round(music.downloadProgress * 100)}%`
-              : playing
-                ? 'Now playing'
-                : downloading
-                  ? 'Finding the song'
-                  : music.status === 'paused'
-                    ? 'Paused'
-                    : music.status === 'none'
-                      ? 'Add a song in the setup'
-                      : 'Ready'}
-        </span>
+        <span className="dock__status">{statusText}</span>
         <div className="dock__track">
           <span className="dock__fill" style={{ width: `${Math.round(music.progress * 100)}%` }} />
           {fetching ? (

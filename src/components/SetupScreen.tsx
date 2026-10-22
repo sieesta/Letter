@@ -3,29 +3,37 @@ import { AnimatePresence, motion } from 'framer-motion'
 import type { MemoryPhoto, MuseumProfile } from '../types'
 import { EMPTY_PROFILE } from '../types'
 import { extractVideoId } from '../lib/youtube'
-import { readFileAsBlob, readImageAsDataUrl } from '../lib/image'
-import { putTrack } from '../lib/idb'
+import { makeSlug } from '../lib/supabaseService'
 
 interface SetupScreenProps {
   profile: MuseumProfile | null
-  onSave: (profile: MuseumProfile) => void
+  onSave?: (profile: MuseumProfile) => void
+  onSaveWithFiles?: (
+    profile: MuseumProfile,
+    photoFiles: File[],
+    audioFile: File | null,
+  ) => void | Promise<void>
   onCancel?: () => void
   onReset: () => void
+  isPublic?: boolean
 }
 
-const AUDIO_KEY = 'file:upload'
-
-function makeId(): string {
-  return Math.random().toString(36).slice(2, 10)
-}
-
-export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenProps) {
+export function SetupScreen({
+  profile,
+  onSave,
+  onSaveWithFiles,
+  onCancel,
+  onReset,
+  isPublic,
+}: SetupScreenProps) {
   const [draft, setDraft] = useState<MuseumProfile>(() => ({ ...EMPTY_PROFILE, ...(profile ?? {}) }))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
+  const [pendingPhotos, setPendingPhotos] = useState<File[]>([])
+  const [pendingAudio, setPendingAudio] = useState<File | null>(null)
 
   const videoId = useMemo(() => extractVideoId(draft.youtubeUrl), [draft.youtubeUrl])
   const canEnter = draft.photos.length > 0 && draft.herName.trim().length > 0
@@ -34,23 +42,12 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
 
   const addFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    setBusy(true)
-    setError(null)
-    try {
-      const next: MemoryPhoto[] = []
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith('image/')) continue
-        const src = await readImageAsDataUrl(file)
-        next.push({ id: makeId(), src, caption: '', date: '' })
-      }
-      if (next.length) {
-        setDraft((current) => ({ ...current, photos: [...current.photos, ...next] }))
-      }
-    } catch {
-      setError('One of those images could not be read.')
-    } finally {
-      setBusy(false)
+    const next: File[] = []
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith('image/')) continue
+      next.push(file)
     }
+    setPendingPhotos((current) => [...current, ...next])
   }
 
   const handleAudio = async (files: FileList | null) => {
@@ -60,27 +57,7 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
       setError('That file does not look like an audio file.')
       return
     }
-    setBusy(true)
-    setError(null)
-    try {
-      const blob = await readFileAsBlob(file)
-      await putTrack({
-        videoId: AUDIO_KEY,
-        title: file.name,
-        mimeType: blob.type || 'audio/mpeg',
-        duration: 0,
-        blob,
-        bytes: blob.size,
-        totalBytes: blob.size,
-        complete: true,
-        updatedAt: Date.now(),
-      })
-      update({ audioKey: AUDIO_KEY, audioFileName: file.name })
-    } catch {
-      setError('That audio file could not be stored.')
-    } finally {
-      setBusy(false)
-    }
+    setPendingAudio(file)
   }
 
   const updatePhoto = (id: string, patch: Partial<MemoryPhoto>) => {
@@ -106,10 +83,34 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
     setDraft((current) => ({ ...current, photos: current.photos.filter((photo) => photo.id !== id) }))
   }
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!canEnter) return
-    onSave({ ...draft, updatedAt: Date.now() })
+    setError(null)
+
+    if (onSaveWithFiles && (pendingPhotos.length > 0 || pendingAudio)) {
+      setBusy(true)
+      try {
+        await onSaveWithFiles(draft, pendingPhotos, pendingAudio)
+        setPendingPhotos([])
+        setPendingAudio(null)
+      } catch {
+        setError('Could not save your hallway. Try again.')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+
+    if (onSave) {
+      onSave({ ...draft, updatedAt: Date.now() })
+      return
+    }
+  }
+
+  const handleGenerateSlug = () => {
+    const slug = makeSlug(draft.herName, draft.hallTitle)
+    update({ slug })
   }
 
   return (
@@ -182,6 +183,25 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
                 placeholder="A Hallway of Us"
               />
             </label>
+            {!isPublic && (
+              <label className="setup__field">
+                <span>Share link (slug)</span>
+                <input
+                  type="text"
+                  value={draft.slug}
+                  onChange={(event) => update({ slug: event.target.value })}
+                  placeholder="memory-lane-maya"
+                />
+                <button
+                  type="button"
+                  className="setup__ghostButton"
+                  onClick={handleGenerateSlug}
+                  style={{ marginTop: 0.5, fontSize: 0.75 }}
+                >
+                  Generate link
+                </button>
+              </label>
+            )}
           </div>
         </section>
 
@@ -201,7 +221,7 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
         <section className="setup__section">
           <h3 className="setup__sectionTitle">
             The pictures
-            <span className="setup__count">{draft.photos.length}</span>
+            <span className="setup__count">{draft.photos.length + pendingPhotos.length}</span>
           </h3>
 
           <div
@@ -282,6 +302,21 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
                   </div>
                 </motion.li>
               ))}
+              {pendingPhotos.map((file, index) => (
+                <motion.li
+                  key={`pending-${index}`}
+                  className="setup__photo"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  transition={{ duration: 0.32 }}
+                >
+                  <div className="setup__photoThumb" style={{ background: '#2a2033' }} />
+                  <div className="setup__photoFields">
+                    <span style={{ fontSize: 0.78, color: '#f0a95e' }}>{file.name}</span>
+                    <span style={{ fontSize: 0.78, color: 'var(--faint)' }}>uploading…</span>
+                  </div>
+                </motion.li>
+              ))}
             </AnimatePresence>
           </ul>
         </section>
@@ -323,9 +358,14 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
                 remove
               </button>
             ) : null}
+            {pendingAudio && (
+              <span style={{ fontSize: 0.78, color: '#f0a95e' }}>
+                {pendingAudio.name} · ready to upload
+              </span>
+            )}
           </div>
           <p className="setup__note">
-            The song is fetched once and kept on this device, so every later visit starts playing immediately.
+            The song is stored and played from your link. It plays the moment she walks in.
           </p>
         </section>
 
@@ -343,7 +383,7 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
         </section>
 
         {error ? <p className="setup__error">{error}</p> : null}
-        {busy ? <p className="setup__note">Working…</p> : null}
+        {busy ? <p className="setup__note">Saving…</p> : null}
 
         <footer className="setup__foot">
           {profile && onCancel ? (
@@ -355,7 +395,7 @@ export function SetupScreen({ profile, onSave, onCancel, onReset }: SetupScreenP
             Start over
           </button>
           <button type="submit" className="setup__submit" disabled={!canEnter || busy}>
-            {canEnter ? 'Enter the hallway' : 'Add a name and a picture'}
+            {canEnter ? 'Save and get link' : 'Add a name and a picture'}
           </button>
         </footer>
       </motion.form>

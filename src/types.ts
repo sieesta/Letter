@@ -6,12 +6,15 @@ export interface MemoryPhoto {
 }
 
 export interface MuseumProfile {
-  id: 'default'
+  id: string
+  userId?: string
+  /** Unique slug used for the public share URL: /m/<slug> */
+  slug: string
   herName: string
   hallTitle: string
   message: string
   youtubeUrl: string
-  /** IndexedDB key of the locally stored audio file, when one was uploaded */
+  /** Supabase storage path of the uploaded audio file, when one was uploaded */
   audioKey: string
   audioFileName: string
   formLink: string
@@ -20,7 +23,8 @@ export interface MuseumProfile {
 }
 
 export const EMPTY_PROFILE: MuseumProfile = {
-  id: 'default',
+  id: '',
+  slug: '',
   herName: '',
   hallTitle: 'A Hallway of Us',
   message: '',
@@ -43,7 +47,7 @@ export type MusicStatus =
   | 'error'
   | 'none'
 
-export type MusicSource = 'none' | 'cache' | 'stream' | 'file' | 'embed'
+export type MusicSource = 'none' | 'cache' | 'stream' | 'file' | 'embed' | 'url'
 
 export interface MusicState {
   status: MusicStatus

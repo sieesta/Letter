@@ -9,9 +9,13 @@
     "dev:lan": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:logic": "esbuild scripts/check-logic.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/check-logic.mjs --log-level=warning && node node_modules/.cache/check-logic.mjs",
+    "check:music": "esbuild scripts/check-music.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/check-music.mjs --log-level=warning && node node_modules/.cache/check-music.mjs",
+    "check": "npm run typecheck && npm run check:logic && npm run check:music"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "framer-motion": "^10.18.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -24,7 +28,7 @@
     "autoprefixer": "^10.4.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5.4.0",
+    "typescript": "^5.9.3",
     "vite": "^5.4.21"
   }
 }

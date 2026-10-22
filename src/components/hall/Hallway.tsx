@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import type { MuseumProfile } from '../../types'
 import { HALL, buildLayout, clotheslinePoints, garlandDepths, garlandPoints, lampDepths } from './geometry'
 import { HangingPhoto } from './HangingPhoto'
@@ -63,6 +62,9 @@ export function Hallway({ profile, onEdit, onReset }: HallwayProps) {
     camX: 0,
   })
   const nearestRef = useRef(-1)
+  // On a narrow screen the corridor is wider than the phone, so the whole
+  // world is scaled down until it fits. Desktop visitors keep it at 1.
+  const scaleRef = useRef(1)
 
   useEffect(() => {
     focusRef.current = focusIndex
@@ -72,6 +74,20 @@ export function Hallway({ profile, onEdit, onReset }: HallwayProps) {
     autoRef.current = autoWalk
     cam.current.auto = autoWalk
   }, [autoWalk])
+
+  useEffect(() => {
+    const measure = () => {
+      const width = window.innerWidth || 1
+      scaleRef.current = Math.min(1, Math.max(0.4, width / 980))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.addEventListener('orientationchange', measure)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('orientationchange', measure)
+    }
+  }, [])
 
   const register = useCallback((index: number, el: HTMLElement | null) => {
     if (el) photoEls.current.set(index, el)
@@ -142,7 +158,8 @@ export function Hallway({ profile, onEdit, onReset }: HallwayProps) {
       if (world) {
         const bob = Math.sin(now / 760) * (s.auto && focused === null ? 3.2 : 1.4)
         const roll = Math.sin(now / 1240) * 0.2
-        world.style.transform = `translate3d(${s.camX + s.lookX * 26}px, ${bob + s.lookY * 14}px, ${s.current}px) rotateX(${-s.lookY * 1.5}deg) rotateY(${s.lookX * 2.1}deg) rotateZ(${roll}deg)`
+        const scale = scaleRef.current
+        world.style.transform = `translate3d(${s.camX + s.lookX * 26}px, ${bob + s.lookY * 14}px, ${s.current}px) rotateX(${-s.lookY * 1.5}deg) rotateY(${s.lookX * 2.1}deg) rotateZ(${roll}deg) scale(${scale})`
       }
 
       // Depth fade: prints dissolve into the dark at the far end of the hall.
@@ -339,6 +356,19 @@ export function Hallway({ profile, onEdit, onReset }: HallwayProps) {
       })),
     [],
   )
+  // Slow orbs of light that drift through the corridor in front of the walls.
+  const orbs = useMemo(
+    () =>
+      Array.from({ length: 9 }, (_, i) => ({
+        left: (8 + pseudoRandom(i * 11.3) * 84).toFixed(2),
+        top: (12 + pseudoRandom(i * 4.9 + 3) * 70).toFixed(2),
+        size: (46 + pseudoRandom(i * 6.1 + 2) * 120).toFixed(0),
+        delay: (pseudoRandom(i * 8.7) * 16).toFixed(2),
+        duration: (18 + pseudoRandom(i * 3.3 + 4) * 22).toFixed(2),
+        hue: pseudoRandom(i * 2.9 + 7) > 0.65 ? 'wine' : 'amber',
+      })),
+    [],
+  )
 
   return (
     <div className="hall" ref={stageRef}>
@@ -406,6 +436,7 @@ export function Hallway({ profile, onEdit, onReset }: HallwayProps) {
             <div key={`lamp-${z}`} className="world-pos" style={{ transform: `translate3d(0px, ${HALL.ceilY + 14}px, ${z}px)` }}>
               <div className="hall-lamp">
                 <span className="hall-lamp__bulb" />
+                <span className="hall-lamp__shaft" />
                 <span className="hall-lamp__pool" />
               </div>
             </div>
@@ -426,6 +457,23 @@ export function Hallway({ profile, onEdit, onReset }: HallwayProps) {
       </div>
 
       <div className="hall-fog" aria-hidden="true" />
+      <div className="hall-sweep" aria-hidden="true" />
+      <div className="hall-bokeh" aria-hidden="true">
+        {orbs.map((orb, i) => (
+          <span
+            key={i}
+            className={`hall-orb hall-orb--${orb.hue}`}
+            style={{
+              left: `${orb.left}%`,
+              top: `${orb.top}%`,
+              width: `${orb.size}px`,
+              height: `${orb.size}px`,
+              animationDelay: `${orb.delay}s`,
+              animationDuration: `${orb.duration}s`,
+            }}
+          />
+        ))}
+      </div>
       <div className="hall-dust" aria-hidden="true">
         {dust.map((mote, i) => (
           <span

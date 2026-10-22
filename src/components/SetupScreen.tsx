@@ -36,7 +36,7 @@ export function SetupScreen({
   const [pendingAudio, setPendingAudio] = useState<File | null>(null)
 
   const videoId = useMemo(() => extractVideoId(draft.youtubeUrl), [draft.youtubeUrl])
-  const canEnter = (draft.photos.length + pendingPhotos.length) > 0 && draft.herName.trim().length > 0
+  const canEnter = draft.photos.length > 0 && draft.herName.trim().length > 0
 
   const update = (patch: Partial<MuseumProfile>) => setDraft((current) => ({ ...current, ...patch }))
 

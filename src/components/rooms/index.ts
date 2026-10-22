@@ -1,0 +1,8 @@
+export { UploadStep } from './UploadStep'
+export { IntroStep } from './IntroStep'
+export { FoyerRoom } from './FoyerRoom'
+export { LivingRoomRoom } from './LivingRoomRoom'
+export { KitchenRoom } from './KitchenRoom'
+export { BedroomRoom } from './BedroomRoom'
+export { GarageRoom } from './GarageRoom'
+export { FinaleRoom } from './FinaleRoom'

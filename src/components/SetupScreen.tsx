@@ -161,15 +161,6 @@ export function SetupScreen({
     }
   }
 
-  const handleGenerateSlug = () => {
-    const slug = draft.herName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'memory-lane'
-    update({ slug })
-  }
-
   const handleYtChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     update({ youtubeUrl: event.target.value })
     void checkYouTube()
@@ -218,36 +209,16 @@ export function SetupScreen({
               />
             </label>
             {!isPublic && (
-              <>
-                <label className="setup__field">
-                  <span>Share link (slug)</span>
-                  <div className="setup__slugRow">
-                    <input
-                      type="text"
-                      value={draft.slug}
-                      onChange={(event) => update({ slug: event.target.value })}
-                      placeholder="memory-lane-maya"
-                    />
-                    <button
-                      type="button"
-                      className="setup__ghostButton"
-                      onClick={handleGenerateSlug}
-                    >
-                      Generate
-                    </button>
-                  </div>
-                </label>
-                <label className="setup__field">
-                  <span>4-digit PIN (your girlfriend will enter this)</span>
-                  <input
-                    type="text"
-                    value={draft.pin}
-                    maxLength={4}
-                    onChange={(event) => update({ pin: event.target.value.replace(/\D/g, '').slice(0, 4) })}
-                    placeholder="1234"
-                  />
-                </label>
-              </>
+              <label className="setup__field">
+                <span>4-digit PIN (your girlfriend will enter this)</span>
+                <input
+                  type="text"
+                  value={draft.pin}
+                  maxLength={4}
+                  onChange={(event) => update({ pin: event.target.value.replace(/\D/g, '').slice(0, 4) })}
+                  placeholder="1234"
+                />
+              </label>
             )}
           </div>
         </section>

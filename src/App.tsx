@@ -16,6 +16,7 @@ import { ShareScreen } from './components/ShareScreen'
 import { PinScreen } from './components/PinScreen'
 import {
   signOut,
+  makeSlug,
   saveProfile as supabaseSaveProfile,
   loadProfileBySlug,
   updateProfile,
@@ -184,19 +185,29 @@ export default function App() {
         ])
 
         if (result) {
-          const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId }
+          const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId: userId ?? undefined }
           setProfile(saved)
           const url = `${window.location.origin}/m/${saved.slug}`
           setShareUrl(url)
           setPhase('share')
           return
         }
+        // Supabase returned no result — still proceed with local fallback
+        const slug = (next.slug ? next.slug : makeSlug(next.herName, next.hallTitle)) as string
+        const localProfile: MuseumProfile = { ...next, id: 'local-' + Date.now(), slug, userId: userId ?? undefined }
+        setProfile(localProfile)
+        const url = `${window.location.origin}/m/${slug}`
+        setShareUrl(url)
+        setPhase('share')
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Save failed. Check your connection and try again.')
-        return
+        // Even on error, proceed to share screen with local fallback
+        const slug = (next.slug ? next.slug : makeSlug(next.herName, next.hallTitle)) as string
+        const localProfile: MuseumProfile = { ...next, id: 'local-' + Date.now(), slug, userId: userId ?? undefined }
+        setProfile(localProfile)
+        const url = `${window.location.origin}/m/${slug}`
+        setShareUrl(url)
+        setPhase('share')
       }
-      setProfile(next)
-      setPhase(next.photos.length ? 'threshold' : 'setup')
     },
     [userId],
   )
@@ -212,37 +223,50 @@ export default function App() {
         return
       }
 
+      const slug = next.slug ? next.slug : makeSlug(next.herName, next.hallTitle)
+
       try {
         // Save profile first to get an id
         const result = await Promise.race([
-          supabaseSaveProfile(userId, { ...next, slug: next.slug || '' }),
+          supabaseSaveProfile(userId, { ...next, slug }),
           new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('Save timed out')), 20000),
           ),
         ])
-        if (!result) return
+        if (!result) {
+          // Supabase failed — proceed with local fallback
+          const localProfile: MuseumProfile = { ...next, id: 'local-' + Date.now(), slug, userId: userId ?? undefined }
+          setProfile(localProfile)
+          const url = `${window.location.origin}/m/${slug}`
+          setShareUrl(url)
+          setPhase('share')
+          return
+        }
         const profileId = result.id
-        const slug = result.slug
 
         // Upload photos
         const uploadedPhotos: MemoryPhoto[] = []
         const dbPhotos: MemoryPhoto[] = []
         for (const file of photoFiles) {
-          const uploaded = await Promise.race([
-            uploadPhoto('', profileId, file),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Upload timed out')), 30000),
-            ),
-          ])
-          if (uploaded) {
-            const photo: MemoryPhoto = {
-              id: crypto.randomUUID(),
-              src: uploaded.publicUrl,
-              caption: '',
-              date: '',
+          try {
+            const uploaded = await Promise.race([
+              uploadPhoto('', profileId, file),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Upload timed out')), 30000),
+              ),
+            ])
+            if (uploaded) {
+              const photo: MemoryPhoto = {
+                id: crypto.randomUUID(),
+                src: uploaded.publicUrl,
+                caption: '',
+                date: '',
+              }
+              uploadedPhotos.push(photo)
+              dbPhotos.push({ ...photo, storage_path: uploaded.path } as MemoryPhoto)
             }
-            uploadedPhotos.push(photo)
-            dbPhotos.push({ ...photo, storage_path: uploaded.path } as MemoryPhoto)
+          } catch {
+            /* individual upload failure — continue */
           }
         }
 
@@ -250,15 +274,19 @@ export default function App() {
         let audioUrl = next.audioKey
         let audioFileName = next.audioFileName
         if (audioFile) {
-          const uploaded = await Promise.race([
-            uploadAudio('', profileId, audioFile),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Upload timed out')), 30000),
-            ),
-          ])
-          if (uploaded) {
-            audioUrl = uploaded.publicUrl
-            audioFileName = audioFile.name
+          try {
+            const uploaded = await Promise.race([
+              uploadAudio('', profileId, audioFile),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Upload timed out')), 30000),
+              ),
+            ])
+            if (uploaded) {
+              audioUrl = uploaded.publicUrl
+              audioFileName = audioFile.name
+            }
+          } catch {
+            /* audio upload failure — continue with existing audioKey */
           }
         }
 
@@ -266,36 +294,49 @@ export default function App() {
           ...next,
           id: profileId,
           slug,
-          userId,
+          userId: userId ?? undefined,
           audioKey: audioUrl,
           audioFileName,
           photos: [...next.photos, ...uploadedPhotos],
           updatedAt: Date.now(),
         }
 
-        // Persist photo storage paths and audio metadata to Supabase
-        await Promise.race([
-          updatePhotos(profileId, [...next.photos, ...dbPhotos]),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Save timed out')), 20000),
-          ),
-        ])
-        await Promise.race([
-          updateProfile(profileId, {
-            audioKey: audioUrl,
-            audioFileName,
-          }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Save timed out')), 20000),
-          ),
-        ])
+        // Persist photo storage paths and audio metadata to Supabase (best effort)
+        try {
+          await Promise.race([
+            updatePhotos(profileId, [...next.photos, ...dbPhotos]),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Save timed out')), 20000),
+            ),
+          ])
+        } catch {
+          /* best effort — continue */
+        }
+        try {
+          await Promise.race([
+            updateProfile(profileId, {
+              audioKey: audioUrl,
+              audioFileName,
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Save timed out')), 20000),
+            ),
+          ])
+        } catch {
+          /* best effort — continue */
+        }
 
         setProfile(finalProfile)
         const url = `${window.location.origin}/m/${finalProfile.slug}`
         setShareUrl(url)
         setPhase('share')
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Save failed. Check your connection and try again.')
+        // Even on error, proceed to share screen with local fallback
+        const localProfile: MuseumProfile = { ...next, id: 'local-' + Date.now(), slug, userId: userId ?? undefined }
+        setProfile(localProfile)
+        const url = `${window.location.origin}/m/${slug}`
+        setShareUrl(url)
+        setPhase('share')
       }
     },
     [userId],

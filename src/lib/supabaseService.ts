@@ -91,14 +91,6 @@ export async function signIn(email: string, password: string): Promise<string> {
   return data.user.id
 }
 
-/** Sign in anonymously (no email/password). Returns the user id. */
-export async function signInAnonymously(): Promise<string> {
-  const { data, error } = await supabase.auth.signInAnonymously()
-  if (error) throw error
-  if (!data?.user?.id) throw new Error('Anonymous sign-in returned no user')
-  return data.user.id
-}
-
 /** Sign out the current user. */
 export async function signOut(): Promise<void> {
   const { error } = await supabase.auth.signOut()

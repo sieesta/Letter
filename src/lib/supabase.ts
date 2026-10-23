@@ -5,7 +5,6 @@
  * Surface we actually use:
  *   supabase.auth.signUp({ email, password })
  *   supabase.auth.signInWithPassword({ email, password })
- *   supabase.auth.signInAnonymously()
  *   supabase.auth.signOut()
  *   supabase.auth.getUser()
  *   supabase.auth.getSession()
@@ -21,10 +20,6 @@ export interface SupabaseClient {
       error: Error | null
     }>
     signInWithPassword: (credentials: { email: string; password: string }) => Promise<{
-      data: { user: { id: string } | null; session: { access_token: string } | null } | null
-      error: Error | null
-    }>
-    signInAnonymously: () => Promise<{
       data: { user: { id: string } | null; session: { access_token: string } | null } | null
       error: Error | null
     }>
@@ -269,25 +264,6 @@ export const supabase: SupabaseClient = {
           /* ignore */
         }
         return { data: null, error: new Error(message) }
-      }
-      const json = await response.json()
-      state.user = { id: json.user?.id || json.id || '' }
-      state.session = { access_token: json.access_token ?? '' }
-      setSession(state.session)
-      notify('SIGNED_IN')
-      return { data: { user: state.user, session: state.session }, error: null }
-    },
-    signInAnonymously: async () => {
-      const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=anonymous`, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_ANON_KEY ?? '',
-          Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ''}`,
-          'Content-Type': 'application/json',
-        },
-      })
-      if (!response.ok) {
-        return { data: null, error: new Error(`Anonymous sign-in failed ${response.status}`) }
       }
       const json = await response.json()
       state.user = { id: json.user?.id || json.id || '' }

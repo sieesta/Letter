@@ -356,8 +356,6 @@ export function SetupScreen({
                 <strong>Song found:</strong> {ytMetadata.title}
               </div>
             </div>
-          ) : videoId ? (
-            <p className="setup__ok">Song found · id {videoId}</p>
           ) : null}
 
           <div className="setup__or">

@@ -259,18 +259,20 @@ export default function App() {
               ),
             ])
             if (uploaded) {
+              // Find the matching photo in draft to preserve caption/date
+              const draftPhoto = (next.photos as any[]).find((p: any) => p.file === file)
               const photo: MemoryPhoto = {
                 id: crypto.randomUUID(),
                 src: uploaded.publicUrl,
-                caption: '',
-                date: '',
+                caption: draftPhoto?.caption || '',
+                date: draftPhoto?.date || '',
               }
               uploadedPhotos.push(photo)
               newDbPhotos.push({
                 profile_id: profileId,
                 storage_path: uploaded.path,
-                caption: null,
-                date: null,
+                caption: draftPhoto?.caption || null,
+                date: draftPhoto?.date || null,
                 sort_order: next.photos.length + i,
               })
             }
@@ -306,19 +308,45 @@ export default function App() {
           userId: userId ?? undefined,
           audioKey: audioUrl,
           audioFileName,
-          // Keep existing photos (no file object) + newly uploaded photos with public URLs
+        // All photos: existing ones without file + newly uploaded ones with public URLs
           photos: [
-            ...((next.photos as any[]).filter((p: any) => !p.file) as MemoryPhoto[]),
+            ...((next.photos as any[])
+              .filter((p: any) => !p.file)
+              .map((p: any) => ({ id: p.id, src: p.src, caption: p.caption || '', date: p.date || '' })) as MemoryPhoto[]),
             ...uploadedPhotos,
           ],
           updatedAt: Date.now(),
         }
 
-        // Persist new photo storage paths to Supabase (insert only, don't delete existing)
-        if (newDbPhotos.length > 0) {
+        // Persist ALL photos to Supabase: delete existing, then insert fresh with storage_path + captions/dates
+        const allDbPhotos = [
+          // Existing photos already in storage
+          ...((next.photos as any[])
+            .filter((p: any) => !p.file && p.storage_path)
+            .map((p: any, index) => ({
+              profile_id: profileId,
+              storage_path: p.storage_path,
+              caption: p.caption || null,
+              date: p.date || null,
+              sort_order: index,
+            }))),
+          // Newly uploaded photos
+          ...newDbPhotos,
+        ]
+        try {
+          await Promise.race([
+            supabase.from('photos').delete().eq('profile_id', profileId),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Save timed out')), 20000),
+            ),
+          ])
+        } catch {
+          /* best effort — continue */
+        }
+        if (allDbPhotos.length > 0) {
           try {
             await Promise.race([
-              supabase.from('photos').insert(newDbPhotos),
+              supabase.from('photos').insert(allDbPhotos),
               new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error('Save timed out')), 20000),
               ),

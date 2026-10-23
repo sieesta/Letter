@@ -141,19 +141,6 @@ export async function saveProfile(
   const created = data as { id: string; slug: string } | null
   if (!created) throw new Error('Profile created but no data returned')
 
-  // Insert photo records with storage_path (empty for now, updated after upload)
-  if (profile.photos.length) {
-    await supabase.from('photos').insert(
-      profile.photos.map((photo, index) => ({
-        profile_id: created.id,
-        storage_path: (photo as { storage_path?: string }).storage_path || '',
-        caption: photo.caption || null,
-        date: photo.date || null,
-        sort_order: index,
-      })),
-    )
-  }
-
   return { slug: created.slug, id: created.id }
 }
 

@@ -1115,6 +1115,50 @@
   margin-bottom: 0.25rem;
 }
 
+/* ============================================================ toast notification */
+
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  background: rgba(20, 12, 8, 0.95);
+  backdrop-filter: blur(20px);
+  color: #fff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+  max-width: 90%;
+  width: 400px;
+}
+
+.toast__message {
+  flex: 1;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.toast__close {
+  background: none;
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* ============================================================ enter sequence */
 
 .enter {

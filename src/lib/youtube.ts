@@ -184,7 +184,7 @@ export function extractVideoId(input: string): string | null {
     return null
   }
 
-  const host = url.hostname.replace(/^www\./, '').toLowerCase()
+  const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '').toLowerCase()
   const isYouTube = host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com') || host.endsWith('youtu.be')
 
   if (!isYouTube) return null

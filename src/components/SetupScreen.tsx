@@ -18,6 +18,10 @@ function dataUrlToPreview(file: File): Promise<string> {
   })
 }
 
+interface PhotoWithFile extends MemoryPhoto {
+  file?: File
+}
+
 interface SetupScreenProps {
   profile: MuseumProfile | null
   onSave?: (profile: MuseumProfile) => void
@@ -62,7 +66,7 @@ export function SetupScreen({
 
   const addFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const newPhotos: MemoryPhoto[] = []
+    const newPhotos: PhotoWithFile[] = []
     for (const file of Array.from(files)) {
       if (!file.type.startsWith('image/')) continue
       try {
@@ -72,13 +76,14 @@ export function SetupScreen({
           src,
           caption: '',
           date: '',
-        })
+          file,
+        } as PhotoWithFile)
       } catch {
         /* skip files that can't be read */
       }
     }
     if (newPhotos.length) {
-      setDraft((current) => ({ ...current, photos: [...current.photos, ...newPhotos] }))
+      setDraft((current) => ({ ...current, photos: [...current.photos, ...newPhotos] as unknown as MemoryPhoto[] }))
     }
   }
 
@@ -142,9 +147,12 @@ export function SetupScreen({
 
     if (onSaveWithFiles) {
       const photoFiles: File[] = []
+      ;(draft.photos as unknown as PhotoWithFile[]).forEach((photo) => {
+        if (photo.file) photoFiles.push(photo.file)
+      })
       setBusy(true)
       try {
-        await onSaveWithFiles(draft, photoFiles, pendingAudio)
+        await onSaveWithFiles(draft as MuseumProfile, photoFiles, pendingAudio)
         setPendingAudio(null)
         return
       } catch (err) {

@@ -10,10 +10,12 @@ import { EnterSequence } from './components/EnterSequence'
 import { Hallway } from './components/hall/Hallway'
 import { MusicDock } from './components/MusicDock'
 import { getStoredSession, getStoredUser, setCurrentSessionState } from './lib/supabase'
+import { supabase } from './lib/supabase'
 import { DesktopModeGate } from './components/DesktopModeGate'
 import { AuthScreen } from './components/AuthScreen'
 import { ShareScreen } from './components/ShareScreen'
 import { PinScreen } from './components/PinScreen'
+import { Toast } from './components/Toast'
 import {
   signOut,
   makeSlug,
@@ -22,7 +24,6 @@ import {
   updateProfile,
   uploadPhoto,
   uploadAudio,
-  updatePhotos,
 } from './lib/supabaseService'
 
 type Phase = 'auth' | 'loading' | 'setup' | 'share' | 'pin' | 'threshold' | 'entering' | 'hall'
@@ -244,10 +245,12 @@ export default function App() {
         }
         const profileId = result.id
 
-        // Upload photos
+        // Upload only new photos (those with File objects) to Supabase Storage
+        const newPhotoFiles = photoFiles
         const uploadedPhotos: MemoryPhoto[] = []
-        const dbPhotos: MemoryPhoto[] = []
-        for (const file of photoFiles) {
+        const newDbPhotos: Array<{ profile_id: string; storage_path: string; caption: string | null; date: string | null; sort_order: number }> = []
+        for (let i = 0; i < newPhotoFiles.length; i++) {
+          const file = newPhotoFiles[i]
           try {
             const uploaded = await Promise.race([
               uploadPhoto('', profileId, file),
@@ -263,7 +266,13 @@ export default function App() {
                 date: '',
               }
               uploadedPhotos.push(photo)
-              dbPhotos.push({ ...photo, storage_path: uploaded.path } as MemoryPhoto)
+              newDbPhotos.push({
+                profile_id: profileId,
+                storage_path: uploaded.path,
+                caption: null,
+                date: null,
+                sort_order: next.photos.length + i,
+              })
             }
           } catch {
             /* individual upload failure — continue */
@@ -297,20 +306,26 @@ export default function App() {
           userId: userId ?? undefined,
           audioKey: audioUrl,
           audioFileName,
-          photos: [...next.photos, ...uploadedPhotos],
+          // Keep existing photos (no file object) + newly uploaded photos with public URLs
+          photos: [
+            ...((next.photos as any[]).filter((p: any) => !p.file) as MemoryPhoto[]),
+            ...uploadedPhotos,
+          ],
           updatedAt: Date.now(),
         }
 
-        // Persist photo storage paths and audio metadata to Supabase (best effort)
-        try {
-          await Promise.race([
-            updatePhotos(profileId, [...next.photos, ...dbPhotos]),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Save timed out')), 20000),
-            ),
-          ])
-        } catch {
-          /* best effort — continue */
+        // Persist new photo storage paths to Supabase (insert only, don't delete existing)
+        if (newDbPhotos.length > 0) {
+          try {
+            await Promise.race([
+              supabase.from('photos').insert(newDbPhotos),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Save timed out')), 20000),
+              ),
+            ])
+          } catch {
+            /* best effort — continue */
+          }
         }
         try {
           await Promise.race([
@@ -488,6 +503,7 @@ export default function App() {
         ) : null}
       </AnimatePresence>
       <DesktopModeGate />
+      {error ? <Toast message={error} onDismiss={() => setError(null)} /> : null}
     </main>
   )
 }

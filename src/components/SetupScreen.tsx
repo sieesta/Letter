@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import type { MemoryPhoto, MuseumProfile } from '../types'
 import { EMPTY_PROFILE } from '../types'
 import { extractVideoId } from '../lib/youtube'
+import { fetchYouTubeMetadata } from '../lib/youtube'
 
 function makeId(): string {
   return Math.random().toString(36).slice(2, 10)
@@ -47,9 +48,15 @@ export function SetupScreen({
   const audioRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
   const [pendingAudio, setPendingAudio] = useState<File | null>(null)
+  const [ytMetadata, setYtMetadata] = useState<{ title: string; thumbnail: string } | null>(null)
+  const [ytChecking, setYtChecking] = useState(false)
 
   const videoId = useMemo(() => extractVideoId(draft.youtubeUrl), [draft.youtubeUrl])
   const canEnter = draft.photos.length > 0 && draft.herName.trim().length > 0
+
+  const missing: string[] = []
+  if (!draft.herName.trim()) missing.push("Her name")
+  if (draft.photos.length === 0) missing.push("At least one picture")
 
   const update = (patch: Partial<MuseumProfile>) => setDraft((current) => ({ ...current, ...patch }))
 
@@ -108,22 +115,40 @@ export function SetupScreen({
     setDraft((current) => ({ ...current, photos: current.photos.filter((photo) => photo.id !== id) }))
   }
 
+  const checkYouTube = async () => {
+    if (!videoId) {
+      setYtMetadata(null)
+      return
+    }
+    setYtChecking(true)
+    try {
+      const meta = await fetchYouTubeMetadata(videoId)
+      setYtMetadata(meta)
+    } catch {
+      setYtMetadata(null)
+    } finally {
+      setYtChecking(false)
+    }
+  }
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!canEnter) return
     setError(null)
+
+    if (missing.length > 0) {
+      setError('Please add: ' + missing.join(', '))
+      return
+    }
 
     if (onSaveWithFiles) {
       const photoFiles: File[] = []
-      // Re-read files from input since we only kept data URLs in draft
-      // The actual files are re-selected by the user or we use stored blobs
-      // For now, pass empty file array — photos already have data URL srcs
       setBusy(true)
       try {
         await onSaveWithFiles(draft, photoFiles, pendingAudio)
         setPendingAudio(null)
-      } catch {
-        setError('Could not save your hallway. Try again.')
+        return
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Save failed. Please try again.')
       } finally {
         setBusy(false)
       }
@@ -134,6 +159,20 @@ export function SetupScreen({
       onSave({ ...draft, updatedAt: Date.now() })
       return
     }
+  }
+
+  const handleGenerateSlug = () => {
+    const slug = draft.herName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'memory-lane'
+    update({ slug })
+  }
+
+  const handleYtChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    update({ youtubeUrl: event.target.value })
+    void checkYouTube()
   }
 
   return (
@@ -179,16 +218,36 @@ export function SetupScreen({
               />
             </label>
             {!isPublic && (
-              <label className="setup__field">
-                <span>4-digit PIN (your girlfriend will enter this)</span>
-                <input
-                  type="text"
-                  value={draft.pin}
-                  maxLength={4}
-                  onChange={(event) => update({ pin: event.target.value.replace(/\D/g, '').slice(0, 4) })}
-                  placeholder="1234"
-                />
-              </label>
+              <>
+                <label className="setup__field">
+                  <span>Share link (slug)</span>
+                  <div className="setup__slugRow">
+                    <input
+                      type="text"
+                      value={draft.slug}
+                      onChange={(event) => update({ slug: event.target.value })}
+                      placeholder="memory-lane-maya"
+                    />
+                    <button
+                      type="button"
+                      className="setup__ghostButton"
+                      onClick={handleGenerateSlug}
+                    >
+                      Generate
+                    </button>
+                  </div>
+                </label>
+                <label className="setup__field">
+                  <span>4-digit PIN (your girlfriend will enter this)</span>
+                  <input
+                    type="text"
+                    value={draft.pin}
+                    maxLength={4}
+                    onChange={(event) => update({ pin: event.target.value.replace(/\D/g, '').slice(0, 4) })}
+                    placeholder="1234"
+                  />
+                </label>
+              </>
             )}
           </div>
         </section>
@@ -301,11 +360,26 @@ export function SetupScreen({
             <input
               type="text"
               value={draft.youtubeUrl}
-              onChange={(event) => update({ youtubeUrl: event.target.value })}
+              onChange={handleYtChange}
               placeholder="https://www.youtube.com/watch?v=…"
             />
           </label>
-          {videoId ? <p className="setup__ok">Song found · id {videoId}</p> : null}
+          {ytChecking ? (
+            <p className="setup__note">Looking up song…</p>
+          ) : ytMetadata ? (
+            <div className="setup__ytPreview">
+              <img
+                src={ytMetadata.thumbnail}
+                alt=""
+                className="setup__ytThumb"
+              />
+              <div>
+                <strong>Song found:</strong> {ytMetadata.title}
+              </div>
+            </div>
+          ) : videoId ? (
+            <p className="setup__ok">Song found · id {videoId}</p>
+          ) : null}
 
           <div className="setup__or">
             <span>or</span>

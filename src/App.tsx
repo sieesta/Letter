@@ -175,7 +175,14 @@ export default function App() {
     async (next: MuseumProfile) => {
       try {
         if (!userId) throw new Error('Not signed in')
-        const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
+
+        const result = await Promise.race([
+          supabaseSaveProfile(userId, { ...next, slug: next.slug || '' }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Save timed out')), 20000),
+          ),
+        ])
+
         if (result) {
           const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId }
           setProfile(saved)
@@ -185,7 +192,7 @@ export default function App() {
           return
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Save failed')
+        setError(err instanceof Error ? err.message : 'Save failed. Check your connection and try again.')
         return
       }
       setProfile(next)
@@ -207,7 +214,12 @@ export default function App() {
 
       try {
         // Save profile first to get an id
-        const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
+        const result = await Promise.race([
+          supabaseSaveProfile(userId, { ...next, slug: next.slug || '' }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Save timed out')), 20000),
+          ),
+        ])
         if (!result) return
         const profileId = result.id
         const slug = result.slug
@@ -216,7 +228,12 @@ export default function App() {
         const uploadedPhotos: MemoryPhoto[] = []
         const dbPhotos: MemoryPhoto[] = []
         for (const file of photoFiles) {
-          const uploaded = await uploadPhoto('', profileId, file)
+          const uploaded = await Promise.race([
+            uploadPhoto('', profileId, file),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Upload timed out')), 30000),
+            ),
+          ])
           if (uploaded) {
             const photo: MemoryPhoto = {
               id: crypto.randomUUID(),
@@ -233,7 +250,12 @@ export default function App() {
         let audioUrl = next.audioKey
         let audioFileName = next.audioFileName
         if (audioFile) {
-          const uploaded = await uploadAudio('', profileId, audioFile)
+          const uploaded = await Promise.race([
+            uploadAudio('', profileId, audioFile),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Upload timed out')), 30000),
+            ),
+          ])
           if (uploaded) {
             audioUrl = uploaded.publicUrl
             audioFileName = audioFile.name
@@ -252,18 +274,28 @@ export default function App() {
         }
 
         // Persist photo storage paths and audio metadata to Supabase
-        await updatePhotos(profileId, [...next.photos, ...dbPhotos])
-        await updateProfile(profileId, {
-          audioKey: audioUrl,
-          audioFileName,
-        })
+        await Promise.race([
+          updatePhotos(profileId, [...next.photos, ...dbPhotos]),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Save timed out')), 20000),
+          ),
+        ])
+        await Promise.race([
+          updateProfile(profileId, {
+            audioKey: audioUrl,
+            audioFileName,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Save timed out')), 20000),
+          ),
+        ])
 
         setProfile(finalProfile)
         const url = `${window.location.origin}/m/${finalProfile.slug}`
         setShareUrl(url)
         setPhase('share')
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Save failed')
+        setError(err instanceof Error ? err.message : 'Save failed. Check your connection and try again.')
       }
     },
     [userId],

@@ -15,6 +15,26 @@
  * started in parallel as a guaranteed fallback.
  */
 
+export interface YouTubeMetadata {
+  title: string
+  thumbnail: string
+}
+
+/** Fetch video title and thumbnail from YouTube's public oEmbed API. */
+export async function fetchYouTubeMetadata(videoId: string): Promise<YouTubeMetadata> {
+  const response = await fetchWithTimeout(
+    `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+    {},
+    10000,
+  )
+  if (!response.ok) throw new Error(`YouTube lookup failed ${response.status}`)
+  const json = await response.json()
+  return {
+    title: json.title ?? 'YouTube video',
+    thumbnail: json.thumbnail_url ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+  }
+}
+
 export interface AudioStream {
   url: string
   mimeType: string

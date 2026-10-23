@@ -9,6 +9,7 @@ interface HallwayProps {
   profile: MuseumProfile
   onEdit: () => void
   onReset: () => void
+  onSignOut?: () => void
 }
 
 interface CameraState {
@@ -31,7 +32,7 @@ const smoothstep = (t: number) => {
   return x * x * (3 - 2 * x)
 }
 
-export function Hallway({ profile, onEdit, onReset }: HallwayProps) {
+export function Hallway({ profile, onEdit, onReset, onSignOut }: HallwayProps) {
   const layout = useMemo(() => buildLayout(profile.photos), [profile.photos])
   const stageRef = useRef<HTMLDivElement>(null)
   const worldRef = useRef<HTMLDivElement>(null)
@@ -507,6 +508,7 @@ export function Hallway({ profile, onEdit, onReset }: HallwayProps) {
         onEdit={onEdit}
         onReset={onReset}
         onCloseFocus={() => setFocusIndex(null)}
+        onSignOut={onSignOut}
       />
     </div>
   )

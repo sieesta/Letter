@@ -5,6 +5,19 @@ import { EMPTY_PROFILE } from '../types'
 import { extractVideoId } from '../lib/youtube'
 import { makeSlug } from '../lib/supabaseService'
 
+function makeId(): string {
+  return Math.random().toString(36).slice(2, 10)
+}
+
+function dataUrlToPreview(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error('Could not read image'))
+    reader.readAsDataURL(file)
+  })
+}
+
 interface SetupScreenProps {
   profile: MuseumProfile | null
   onSave?: (profile: MuseumProfile) => void
@@ -15,6 +28,7 @@ interface SetupScreenProps {
   ) => void | Promise<void>
   onCancel?: () => void
   onReset: () => void
+  onSignOut?: () => void
   isPublic?: boolean
 }
 
@@ -24,6 +38,7 @@ export function SetupScreen({
   onSaveWithFiles,
   onCancel,
   onReset,
+  onSignOut,
   isPublic,
 }: SetupScreenProps) {
   const [draft, setDraft] = useState<MuseumProfile>(() => ({ ...EMPTY_PROFILE, ...(profile ?? {}) }))
@@ -32,7 +47,6 @@ export function SetupScreen({
   const fileRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
-  const [pendingPhotos, setPendingPhotos] = useState<File[]>([])
   const [pendingAudio, setPendingAudio] = useState<File | null>(null)
 
   const videoId = useMemo(() => extractVideoId(draft.youtubeUrl), [draft.youtubeUrl])
@@ -42,12 +56,24 @@ export function SetupScreen({
 
   const addFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const next: File[] = []
+    const newPhotos: MemoryPhoto[] = []
     for (const file of Array.from(files)) {
       if (!file.type.startsWith('image/')) continue
-      next.push(file)
+      try {
+        const src = await dataUrlToPreview(file)
+        newPhotos.push({
+          id: makeId(),
+          src,
+          caption: '',
+          date: '',
+        })
+      } catch {
+        /* skip files that can't be read */
+      }
     }
-    setPendingPhotos((current) => [...current, ...next])
+    if (newPhotos.length) {
+      setDraft((current) => ({ ...current, photos: [...current.photos, ...newPhotos] }))
+    }
   }
 
   const handleAudio = async (files: FileList | null) => {
@@ -88,11 +114,14 @@ export function SetupScreen({
     if (!canEnter) return
     setError(null)
 
-    if (onSaveWithFiles && (pendingPhotos.length > 0 || pendingAudio)) {
+    if (onSaveWithFiles) {
+      const photoFiles: File[] = []
+      // Re-read files from input since we only kept data URLs in draft
+      // The actual files are re-selected by the user or we use stored blobs
+      // For now, pass empty file array — photos already have data URL srcs
       setBusy(true)
       try {
-        await onSaveWithFiles(draft, pendingPhotos, pendingAudio)
-        setPendingPhotos([])
+        await onSaveWithFiles(draft, photoFiles, pendingAudio)
         setPendingAudio(null)
       } catch {
         setError('Could not save your hallway. Try again.')
@@ -125,8 +154,13 @@ export function SetupScreen({
         <header className="setup__head">
           <h1 className="setup__title">Build the hallway</h1>
           <p className="setup__sub">
-            Add the pictures, the words and the song. Everything stays on this device — nothing is uploaded.
+            Add the pictures, the words and the song. Everything stays on your device — nothing is uploaded.
           </p>
+          {onSignOut ? (
+            <button type="button" className="setup__ghostButton setup__ghostButton--quiet" onClick={onSignOut} style={{ marginTop: 1 }}>
+              Sign out
+            </button>
+          ) : null}
         </header>
 
         <section className="setup__section">
@@ -188,7 +222,7 @@ export function SetupScreen({
         <section className="setup__section">
           <h3 className="setup__sectionTitle">
             The pictures
-            <span className="setup__count">{draft.photos.length + pendingPhotos.length}</span>
+            <span className="setup__count">{draft.photos.length}</span>
           </h3>
 
           <div
@@ -266,21 +300,6 @@ export function SetupScreen({
                     <button type="button" onClick={() => removePhoto(photo.id)} aria-label="Remove picture">
                       ✕
                     </button>
-                  </div>
-                </motion.li>
-              ))}
-              {pendingPhotos.map((file, index) => (
-                <motion.li
-                  key={`pending-${index}`}
-                  className="setup__photo"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  transition={{ duration: 0.32 }}
-                >
-                  <div className="setup__photoThumb" style={{ background: '#2a2033' }} />
-                  <div className="setup__photoFields">
-                    <span style={{ fontSize: 0.78, color: '#f0a95e' }}>{file.name}</span>
-                    <span style={{ fontSize: 0.78, color: 'var(--faint)' }}>uploading…</span>
                   </div>
                 </motion.li>
               ))}

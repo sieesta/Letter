@@ -9,10 +9,12 @@ import { ThresholdScreen } from './components/ThresholdScreen'
 import { EnterSequence } from './components/EnterSequence'
 import { Hallway } from './components/hall/Hallway'
 import { MusicDock } from './components/MusicDock'
+import { supabase } from './lib/supabase'
 import { DesktopModeGate } from './components/DesktopModeGate'
+import { AuthScreen } from './components/AuthScreen'
 import {
   signInAnonymously,
-  getCurrentUserId,
+  signOut,
   saveProfile as supabaseSaveProfile,
   loadProfileBySlug,
   updateProfile,
@@ -21,18 +23,19 @@ import {
   updatePhotos,
 } from './lib/supabaseService'
 
-type Phase = 'loading' | 'setup' | 'threshold' | 'entering' | 'hall'
+type Phase = 'auth' | 'loading' | 'setup' | 'threshold' | 'entering' | 'hall'
 
 const SLUG_RE = /^\/m\/([a-z0-9-]+)(\/)?$/
 
 export default function App() {
   const engine = useMemo(() => new MusicEngine(), [])
   const music = useMusic(engine)
-  const [phase, setPhase] = useState<Phase>('setup')
+  const [phase, setPhase] = useState<Phase>('auth')
   const [profile, setProfile] = useState<MuseumProfile | null>(null)
   const [volume, setVolume] = useState(() => engine.getVolume())
   const [isPublic, setIsPublic] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
 
   // Detect public share URL: /m/<slug>
   useEffect(() => {
@@ -57,17 +60,30 @@ export default function App() {
     }
   }, [])
 
-  // Anonymous sign-in + load creator's profiles
+  // Check for existing session on load
   useEffect(() => {
     let alive = true
     const init = async () => {
       try {
-        await signInAnonymously()
+        const { data } = await supabase.auth.getSession()
+        const session = data?.session ?? null
+        if (session && session.access_token) {
+          // Logged in — go to setup (or public view if /m/:slug)
+          setPhase('setup')
+          return
+        }
+        // Not logged in — try anonymous sign-in as fallback
+        try {
+          await signInAnonymously()
+        } catch {
+          /* anonymous sign-in may fail */
+        }
+        if (!alive) return
+        setPhase('setup')
       } catch {
-        /* sign-in may fail offline; app still works for public view */
+        if (!alive) return
+        setPhase('auth')
       }
-      if (!alive) return
-      setPhase('setup')
     }
     init()
     return () => {
@@ -95,7 +111,6 @@ export default function App() {
   const startMusic = useCallback(
     (target: MuseumProfile) => {
       const videoId = extractVideoId(target.youtubeUrl)
-      // Prefer a direct Supabase audio URL, then YouTube id, then silence.
       if (target.audioKey && target.audioKey.startsWith('http')) {
         void engine.start({ audioUrl: target.audioKey, audioFileName: target.audioFileName })
         return
@@ -118,28 +133,44 @@ export default function App() {
 
   const handleEnter = useCallback(() => {
     if (!profile) return
-    // Must happen inside the click so the browser unlocks audio.
     engine.arm()
     engine.ensureUnlocked?.()
     startMusic(profile)
     setPhase('entering')
   }, [engine, profile, startMusic])
 
+  const handleAuthenticate = useCallback(() => {
+    setPhase('setup')
+  }, [])
+
+  const handleToggleAuthMode = useCallback(() => {
+    setAuthMode((prev) => (prev === 'login' ? 'signup' : 'login'))
+  }, [])
+
+  const handleSignOut = useCallback(async () => {
+    try {
+      await signOut()
+    } catch {
+      /* ignore */
+    }
+    setProfile(null)
+    setPhase('auth')
+    setAuthMode('login')
+  }, [])
+
   const handleSave = useCallback(
     async (next: MuseumProfile) => {
       try {
-        const userId = await getCurrentUserId()
-        if (userId) {
-          const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
-          if (result) {
-            const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId }
-            setProfile(saved)
-            setPhase(saved.photos.length ? 'threshold' : 'setup')
-            return
-          }
+        const result = await supabaseSaveProfile({ ...next, slug: next.slug || '' })
+        if (result) {
+          const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId: '' }
+          setProfile(saved)
+          setPhase(saved.photos.length ? 'threshold' : 'setup')
+          return
         }
-      } catch {
-        /* fall through */
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Save failed')
+        return
       }
       setProfile(next)
       setPhase(next.photos.length ? 'threshold' : 'setup')
@@ -153,12 +184,9 @@ export default function App() {
       photoFiles: File[],
       audioFile: File | null,
     ) => {
-      const userId = await getCurrentUserId()
-      if (!userId) return
-
       try {
         // Save profile first to get an id
-        const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
+        const result = await supabaseSaveProfile({ ...next, slug: next.slug || '' })
         if (!result) return
         const profileId = result.id
         const slug = result.slug
@@ -167,7 +195,7 @@ export default function App() {
         const uploadedPhotos: MemoryPhoto[] = []
         const dbPhotos: MemoryPhoto[] = []
         for (const file of photoFiles) {
-          const uploaded = await uploadPhoto(userId, profileId, file)
+          const uploaded = await uploadPhoto('', profileId, file)
           if (uploaded) {
             const photo: MemoryPhoto = {
               id: crypto.randomUUID(),
@@ -184,7 +212,7 @@ export default function App() {
         let audioUrl = next.audioKey
         let audioFileName = next.audioFileName
         if (audioFile) {
-          const uploaded = await uploadAudio(userId, profileId, audioFile)
+          const uploaded = await uploadAudio('', profileId, audioFile)
           if (uploaded) {
             audioUrl = uploaded.publicUrl
             audioFileName = audioFile.name
@@ -195,7 +223,7 @@ export default function App() {
           ...next,
           id: profileId,
           slug,
-          userId,
+          userId: '',
           audioKey: audioUrl,
           audioFileName,
           photos: [...next.photos, ...uploadedPhotos],
@@ -204,7 +232,7 @@ export default function App() {
 
         // Persist photo storage paths and audio metadata to Supabase
         await updatePhotos(profileId, [...next.photos, ...dbPhotos])
-        await updateProfile(userId, profileId, {
+        await updateProfile(profileId, {
           audioKey: audioUrl,
           audioFileName,
         })
@@ -234,6 +262,22 @@ export default function App() {
   return (
     <main className="app">
       <AnimatePresence mode="wait">
+        {phase === 'auth' ? (
+          <motion.div
+            key="auth"
+            className="app__screen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <AuthScreen
+              mode={authMode}
+              onAuthenticate={handleAuthenticate}
+              onToggleMode={handleToggleAuthMode}
+            />
+          </motion.div>
+        ) : null}
 
         {phase === 'loading' ? (
           <motion.div key="loading" className="app__boot" exit={{ opacity: 0 }}>
@@ -259,6 +303,7 @@ export default function App() {
               onSaveWithFiles={isPublic ? undefined : handleSaveWithFiles}
               onCancel={profile ? handleBackToHall : undefined}
               onReset={handleReset}
+              onSignOut={handleSignOut}
               isPublic={isPublic}
             />
           </motion.div>
@@ -278,6 +323,7 @@ export default function App() {
               onEnter={handleEnter}
               onEdit={handleEdit}
               onReset={handleReset}
+              onSignOut={handleSignOut}
               isPublic={isPublic}
               shareUrl={isPublic && profile.slug ? `${window.location.origin}/m/${profile.slug}` : undefined}
             />
@@ -296,7 +342,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.9 }}
           >
-            <Hallway profile={profile} onEdit={handleEdit} onReset={handleReset} />
+            <Hallway profile={profile} onEdit={handleEdit} onReset={handleReset} onSignOut={handleSignOut} />
             <MusicDock
               music={music}
               volume={volume}

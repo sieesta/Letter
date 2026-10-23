@@ -1,8 +1,8 @@
 /**
  * App-specific Supabase helpers.
  *
- * Profiles are owned by an anonymous auth user. Each profile gets a unique
- * slug that becomes its public share URL: /m/<slug>
+ * Profiles are owned by an authenticated user (email/password or anonymous).
+ * Each profile gets a unique slug that becomes its public share URL: /m/<slug>
  */
 
 import type { MemoryPhoto, MuseumProfile } from '../types'
@@ -73,6 +73,22 @@ function rowToProfile(row: ProfileRow, photos: PhotoRow[]): MuseumProfile {
   }
 }
 
+/** Sign up with email/password (no email confirmation required). Returns user id. */
+export async function signUp(email: string, password: string): Promise<string> {
+  const { data, error } = await supabase.auth.signUp({ email, password })
+  if (error) throw error
+  if (!data?.user?.id) throw new Error('Sign up returned no user')
+  return data.user.id
+}
+
+/** Sign in with email/password. Returns user id. */
+export async function signIn(email: string, password: string): Promise<string> {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) throw error
+  if (!data?.user?.id) throw new Error('Sign in returned no user')
+  return data.user.id
+}
+
 /** Sign in anonymously (no email/password). Returns the user id. */
 export async function signInAnonymously(): Promise<string> {
   const { data, error } = await supabase.auth.signInAnonymously()
@@ -81,21 +97,31 @@ export async function signInAnonymously(): Promise<string> {
   return data.user.id
 }
 
+/** Sign out the current user. */
+export async function signOut(): Promise<void> {
+  const { error } = await supabase.auth.signOut()
+  if (error) throw error
+}
+
 export async function getCurrentUserId(): Promise<string | null> {
   const { data, error } = await supabase.auth.getUser()
   if (error) return null
   return data.user?.id ?? null
 }
 
+export async function getCurrentSession(): Promise<{ access_token: string } | null> {
+  const { data, error } = await supabase.auth.getSession()
+  if (error) return null
+  return data.session ?? null
+}
+
 export async function saveProfile(
-  userId: string,
   profile: MuseumProfile & { slug?: string },
 ): Promise<{ slug: string; id: string } | null> {
   const slug = profile.slug || makeSlug(profile.herName, profile.hallTitle)
   const { data, error } = await supabase
     .from('profiles')
     .insert({
-      user_id: userId,
       slug,
       her_name: profile.herName || null,
       hall_title: profile.hallTitle || null,
@@ -109,9 +135,8 @@ export async function saveProfile(
     .single()
 
   if (error) {
-    // slug may be taken — retry with a fresh suffix
     if (error.message.includes('duplicate') || error.message.includes('unique')) {
-      return saveProfile(userId, { ...profile, slug: makeSlug(profile.herName, profile.hallTitle) })
+      return saveProfile({ ...profile, slug: makeSlug(profile.herName, profile.hallTitle) })
     }
     throw error
   }
@@ -119,11 +144,12 @@ export async function saveProfile(
   const created = data as { id: string; slug: string } | null
   if (!created) return null
 
+  // Insert photo records with storage_path (empty for now, updated after upload)
   if (profile.photos.length) {
     await supabase.from('photos').insert(
       profile.photos.map((photo, index) => ({
         profile_id: created.id,
-        storage_path: '', // filled after upload
+        storage_path: (photo as { storage_path?: string }).storage_path || '',
         caption: photo.caption || null,
         date: photo.date || null,
         sort_order: index,
@@ -135,7 +161,6 @@ export async function saveProfile(
 }
 
 export async function updateProfile(
-  userId: string,
   profileId: string,
   patch: Partial<MuseumProfile>,
 ): Promise<void> {
@@ -152,7 +177,6 @@ export async function updateProfile(
       updated_at: new Date().toISOString(),
     })
     .eq('id', profileId)
-    .eq('user_id', userId)
 
   if (error) throw error
 }
@@ -163,8 +187,6 @@ export async function loadProfileBySlug(slug: string): Promise<MuseumProfile | n
     .select('*')
     .eq('slug', slug)
     .single()
-
-  if (error || !profiles) return null
 
   if (error || !profiles) return null
 
@@ -191,7 +213,7 @@ export async function loadProfilesForUser(userId: string): Promise<MuseumProfile
 
   if (error || !profiles) return []
 
-  const rows = profiles as ProfileRow[]
+  const rows = (profiles as unknown) as ProfileRow[]
   const result: MuseumProfile[] = []
   for (const row of rows) {
     const { data: photos } = await supabase

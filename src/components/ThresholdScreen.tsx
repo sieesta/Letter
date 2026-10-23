@@ -6,12 +6,13 @@ interface ThresholdScreenProps {
   onEnter: () => void
   onEdit: () => void
   onReset: () => void
+  onSignOut?: () => void
   isPublic?: boolean
   shareUrl?: string
 }
 
 /** The doorway of the experience: one button, then the hall opens. */
-export function ThresholdScreen({ profile, onEnter, onEdit, onReset, isPublic, shareUrl }: ThresholdScreenProps) {
+export function ThresholdScreen({ profile, onEnter, onEdit, onReset, onSignOut, isPublic, shareUrl }: ThresholdScreenProps) {
   const preview = profile.photos.slice(0, 5)
 
   return (
@@ -144,6 +145,11 @@ export function ThresholdScreen({ profile, onEnter, onEdit, onReset, isPublic, s
               <button type="button" className="threshold__link threshold__link--quiet" onClick={onReset}>
                 Start over
               </button>
+              {onSignOut && (
+                <button type="button" className="threshold__link threshold__link--quiet" onClick={onSignOut}>
+                  Sign out
+                </button>
+              )}
             </>
           )}
         </motion.div>

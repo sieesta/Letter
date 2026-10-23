@@ -17,6 +17,7 @@ interface HallHudProps {
   onEdit: () => void
   onReset: () => void
   onCloseFocus: () => void
+  onSignOut?: () => void
 }
 
 export function HallHud({
@@ -32,6 +33,7 @@ export function HallHud({
   onEdit,
   onReset,
   onCloseFocus,
+  onSignOut,
 }: HallHudProps) {
   const focusedSlot = focusIndex !== null ? layout.slots[focusIndex] : null
 
@@ -72,6 +74,11 @@ export function HallHud({
           <button type="button" className="hall-chip hall-chip--ghost" onClick={onReset}>
             Reset
           </button>
+          {onSignOut && (
+            <button type="button" className="hall-chip hall-chip--ghost" onClick={onSignOut}>
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 

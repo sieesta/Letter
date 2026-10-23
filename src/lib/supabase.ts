@@ -3,17 +3,34 @@
  * this environment so @supabase/supabase-js cannot be installed.
  *
  * Surface we actually use:
+ *   supabase.auth.signUp({ email, password })
+ *   supabase.auth.signInWithPassword({ email, password })
  *   supabase.auth.signInAnonymously()
+ *   supabase.auth.signOut()
  *   supabase.auth.getUser()
+ *   supabase.auth.getSession()
  *   supabase.auth.onAuthStateChange(cb)
- *   supabase.from('table').insert / select / update / eq / order / single
+ *   supabase.from('table').insert / select / update / delete / eq / order / single
  *   supabase.storage.from('bucket').upload / getPublicUrl / remove
  */
 
 export interface SupabaseClient {
   auth: {
-    signInAnonymously: () => Promise<{ data: { user: { id: string } | null; session: { access_token: string } | null } | null; error: Error | null }>
+    signUp: (credentials: { email: string; password: string }) => Promise<{
+      data: { user: { id: string } | null; session: { access_token: string } | null } | null
+      error: Error | null
+    }>
+    signInWithPassword: (credentials: { email: string; password: string }) => Promise<{
+      data: { user: { id: string } | null; session: { access_token: string } | null } | null
+      error: Error | null
+    }>
+    signInAnonymously: () => Promise<{
+      data: { user: { id: string } | null; session: { access_token: string } | null } | null
+      error: Error | null
+    }>
+    signOut: () => Promise<{ error: Error | null }>
     getUser: () => Promise<{ data: { user: { id: string } | null }; error: Error | null }>
+    getSession: () => Promise<{ data: { session: { access_token: string } | null }; error: Error | null }>
     onAuthStateChange: (cb: (event: string, session: { access_token: string } | null) => void) => { data: { subscription: { unsubscribe: () => void } } }
   }
   from: (table: string) => SupabaseQuery
@@ -47,10 +64,17 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   console.warn('[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY not set — Supabase calls will fail')
 }
 
+/** Current session, set by auth methods. Used for Authorization headers. */
+let currentSession: { access_token: string } | null = null
+
+function setSession(session: { access_token: string } | null) {
+  currentSession = session
+}
+
 function authHeaders(): Record<string, string> {
   return {
     apikey: SUPABASE_ANON_KEY ?? '',
-    Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ''}`,
+    Authorization: `Bearer ${currentSession?.access_token ?? SUPABASE_ANON_KEY ?? ''}`,
   }
 }
 
@@ -143,7 +167,7 @@ function storageFrom(bucket: string): SupabaseStorage {
         method: 'POST',
         headers: {
           apikey: SUPABASE_ANON_KEY ?? '',
-          Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ''}`,
+          Authorization: `Bearer ${currentSession?.access_token ?? SUPABASE_ANON_KEY ?? ''}`,
           'Cache-Control': opts.cacheControl || '3600',
           ...(opts.contentType ? { 'Content-Type': opts.contentType } : {}),
         },
@@ -174,7 +198,7 @@ function storageFrom(bucket: string): SupabaseStorage {
         method: 'DELETE',
         headers: {
           apikey: SUPABASE_ANON_KEY ?? '',
-          Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ''}`,
+          Authorization: `Bearer ${currentSession?.access_token ?? SUPABASE_ANON_KEY ?? ''}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(paths),
@@ -199,6 +223,60 @@ function notify(event: string) {
 
 export const supabase: SupabaseClient = {
   auth: {
+    signUp: async ({ email, password }) => {
+      const response = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY ?? '',
+          Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      })
+      if (!response.ok) {
+        let message = `Sign up failed ${response.status}`
+        try {
+          const json = await response.json()
+          message = json?.error?.message || message
+        } catch {
+          /* ignore */
+        }
+        return { data: null, error: new Error(message) }
+      }
+      const json = await response.json()
+      state.user = { id: json.user?.id || json.id || '' }
+      state.session = { access_token: json.access_token ?? '' }
+      setSession(state.session)
+      notify('SIGNED_UP')
+      return { data: { user: state.user, session: state.session }, error: null }
+    },
+    signInWithPassword: async ({ email, password }) => {
+      const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY ?? '',
+          Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      })
+      if (!response.ok) {
+        let message = `Sign in failed ${response.status}`
+        try {
+          const json = await response.json()
+          message = json?.error?.message || message
+        } catch {
+          /* ignore */
+        }
+        return { data: null, error: new Error(message) }
+      }
+      const json = await response.json()
+      state.user = { id: json.user?.id || json.id || '' }
+      state.session = { access_token: json.access_token ?? '' }
+      setSession(state.session)
+      notify('SIGNED_IN')
+      return { data: { user: state.user, session: state.session }, error: null }
+    },
     signInAnonymously: async () => {
       const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=anonymous`, {
         method: 'POST',
@@ -214,11 +292,26 @@ export const supabase: SupabaseClient = {
       const json = await response.json()
       state.user = { id: json.user?.id || json.id || '' }
       state.session = { access_token: json.access_token ?? '' }
+      setSession(state.session)
       notify('SIGNED_IN')
       return { data: { user: state.user, session: state.session }, error: null }
     },
+    signOut: async () => {
+      await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+        method: 'POST',
+        headers: authHeaders(),
+      })
+      state.user = null
+      state.session = null
+      setSession(null)
+      notify('SIGNED_OUT')
+      return { error: null }
+    },
     getUser: async () => {
       return { data: { user: state.user }, error: null }
+    },
+    getSession: async () => {
+      return { data: { session: state.session }, error: null }
     },
     onAuthStateChange: (cb) => {
       listeners.add(cb)

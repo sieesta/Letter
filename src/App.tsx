@@ -15,7 +15,6 @@ import { AuthScreen } from './components/AuthScreen'
 import { ShareScreen } from './components/ShareScreen'
 import { PinScreen } from './components/PinScreen'
 import {
-  signInAnonymously,
   signOut,
   saveProfile as supabaseSaveProfile,
   loadProfileBySlug,
@@ -75,14 +74,9 @@ export default function App() {
           setPhase('setup')
           return
         }
-        // Not logged in — try anonymous sign-in as fallback
-        try {
-          await signInAnonymously()
-        } catch {
-          /* anonymous sign-in may fail */
-        }
+        // No session — show auth screen (login/signup)
         if (!alive) return
-        setPhase('setup')
+        setPhase('auth')
       } catch {
         if (!alive) return
         setPhase('auth')

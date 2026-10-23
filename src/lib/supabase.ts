@@ -202,8 +202,13 @@ function makeQuery(table: string): SupabaseQuery {
     },
     then: (onFulfilled) => {
       const query = params.length ? `?${params.join('&')}` : ''
-      const suffix = single ? '.single' : ''
+      // .single() is a PostgREST convention for SELECT only, not INSERT/UPDATE/DELETE
+      const suffix = single && method === 'GET' ? '.single' : ''
       return request(method, `/${table}${query}${suffix}`, body).then((result) => {
+        // For INSERT/UPDATE with return=representation, PostgREST returns array; unwrap if single
+        if (single && method !== 'GET' && Array.isArray(result.data) && result.data.length > 0) {
+          result.data = result.data[0]
+        }
         onFulfilled(result)
         return result
       })

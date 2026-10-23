@@ -110,10 +110,9 @@ export async function getCurrentSession(): Promise<{ access_token: string } | nu
 }
 
 export async function saveProfile(
+  userId: string,
   profile: MuseumProfile & { slug?: string },
 ): Promise<{ slug: string; id: string } | null> {
-  const userId = await getCurrentUserId()
-  if (!userId) throw new Error('Not signed in')
   const slug = profile.slug || makeSlug(profile.herName, profile.hallTitle)
   const { data, error } = await supabase
     .from('profiles')
@@ -134,13 +133,13 @@ export async function saveProfile(
 
   if (error) {
     if (error.message.includes('duplicate') || error.message.includes('unique')) {
-      return saveProfile({ ...profile, slug: makeSlug(profile.herName, profile.hallTitle) })
+      return saveProfile(userId, { ...profile, slug: makeSlug(profile.herName, profile.hallTitle) })
     }
     throw error
   }
 
   const created = data as { id: string; slug: string } | null
-  if (!created) return null
+  if (!created) throw new Error('Profile created but no data returned')
 
   // Insert photo records with storage_path (empty for now, updated after upload)
   if (profile.photos.length) {

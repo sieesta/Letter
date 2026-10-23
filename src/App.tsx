@@ -38,6 +38,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [shareUrl, setShareUrl] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
 
   // Detect public share URL: /m/<slug>
   useEffect(() => {
@@ -71,6 +72,10 @@ export default function App() {
         const session = data?.session ?? null
         if (session && session.access_token) {
           // Logged in — go to setup (or public view if /m/:slug)
+          const { data: userData } = await supabase.auth.getUser()
+          if (userData?.user?.id) {
+            setUserId(userData.user.id)
+          }
           setPhase('setup')
           return
         }
@@ -148,7 +153,8 @@ export default function App() {
     setPhase('threshold')
   }, [engine, profile])
 
-  const handleAuthenticate = useCallback(() => {
+  const handleAuthenticate = useCallback(async (newUserId: string) => {
+    setUserId(newUserId)
     setPhase('setup')
   }, [])
 
@@ -163,6 +169,7 @@ export default function App() {
       /* ignore */
     }
     setProfile(null)
+    setUserId(null)
     setPhase('auth')
     setAuthMode('login')
   }, [])
@@ -170,9 +177,10 @@ export default function App() {
   const handleSave = useCallback(
     async (next: MuseumProfile) => {
       try {
-        const result = await supabaseSaveProfile({ ...next, slug: next.slug || '' })
+        if (!userId) throw new Error('Not signed in')
+        const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
         if (result) {
-          const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId: '' }
+          const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId }
           setProfile(saved)
           const url = `${window.location.origin}/m/${saved.slug}`
           setShareUrl(url)
@@ -186,7 +194,7 @@ export default function App() {
       setProfile(next)
       setPhase(next.photos.length ? 'threshold' : 'setup')
     },
-    [],
+    [userId],
   )
 
   const handleSaveWithFiles = useCallback(
@@ -195,9 +203,14 @@ export default function App() {
       photoFiles: File[],
       audioFile: File | null,
     ) => {
+      if (!userId) {
+        setError('Not signed in')
+        return
+      }
+
       try {
         // Save profile first to get an id
-        const result = await supabaseSaveProfile({ ...next, slug: next.slug || '' })
+        const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
         if (!result) return
         const profileId = result.id
         const slug = result.slug
@@ -234,7 +247,7 @@ export default function App() {
           ...next,
           id: profileId,
           slug,
-          userId: '',
+          userId,
           audioKey: audioUrl,
           audioFileName,
           photos: [...next.photos, ...uploadedPhotos],
@@ -256,7 +269,7 @@ export default function App() {
         setError(err instanceof Error ? err.message : 'Save failed')
       }
     },
-    [],
+    [userId],
   )
 
   const handleReset = useCallback(() => {

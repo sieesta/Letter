@@ -298,7 +298,7 @@ export const supabase: SupabaseClient = {
       }
       const json = await response.json()
       state.user = { id: json.user?.id || json.id || '' }
-      state.session = { access_token: json.access_token ?? '' }
+      state.session = { access_token: json.session?.access_token ?? '' }
       storeSession(state.session)
       storeUser(state.user)
       currentSession = state.session

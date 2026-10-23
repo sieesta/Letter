@@ -10,6 +10,8 @@ export interface MuseumProfile {
   userId?: string
   /** Unique slug used for the public share URL: /m/<slug> */
   slug: string
+  /** 4-digit PIN for public visitors to unlock the hallway */
+  pin: string
   herName: string
   hallTitle: string
   message: string
@@ -25,6 +27,7 @@ export interface MuseumProfile {
 export const EMPTY_PROFILE: MuseumProfile = {
   id: '',
   slug: '',
+  pin: '',
   herName: '',
   hallTitle: 'A Hallway of Us',
   message: '',

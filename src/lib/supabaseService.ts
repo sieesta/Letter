@@ -27,6 +27,7 @@ export interface ProfileRow {
   id: string
   user_id: string
   slug: string
+  pin: string | null
   her_name: string | null
   hall_title: string | null
   message: string | null
@@ -52,6 +53,7 @@ function rowToProfile(row: ProfileRow, photos: PhotoRow[]): MuseumProfile {
   return {
     id: row.id,
     slug: row.slug,
+    pin: row.pin ?? '',
     userId: row.user_id,
     herName: row.her_name ?? '',
     hallTitle: row.hall_title ?? EMPTY_PROFILE.hallTitle,
@@ -118,11 +120,15 @@ export async function getCurrentSession(): Promise<{ access_token: string } | nu
 export async function saveProfile(
   profile: MuseumProfile & { slug?: string },
 ): Promise<{ slug: string; id: string } | null> {
+  const userId = await getCurrentUserId()
+  if (!userId) throw new Error('Not signed in')
   const slug = profile.slug || makeSlug(profile.herName, profile.hallTitle)
   const { data, error } = await supabase
     .from('profiles')
     .insert({
+      user_id: userId,
       slug,
+      pin: profile.pin || null,
       her_name: profile.herName || null,
       hall_title: profile.hallTitle || null,
       message: profile.message || null,

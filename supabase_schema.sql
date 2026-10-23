@@ -13,6 +13,7 @@ create table if not exists profiles (
   id uuid default gen_random_uuid() primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
   slug text unique not null,
+  pin text,
   her_name text,
   hall_title text default 'A Hallway of Us',
   message text,

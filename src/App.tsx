@@ -12,6 +12,8 @@ import { MusicDock } from './components/MusicDock'
 import { supabase } from './lib/supabase'
 import { DesktopModeGate } from './components/DesktopModeGate'
 import { AuthScreen } from './components/AuthScreen'
+import { ShareScreen } from './components/ShareScreen'
+import { PinScreen } from './components/PinScreen'
 import {
   signInAnonymously,
   signOut,
@@ -23,7 +25,7 @@ import {
   updatePhotos,
 } from './lib/supabaseService'
 
-type Phase = 'auth' | 'loading' | 'setup' | 'threshold' | 'entering' | 'hall'
+type Phase = 'auth' | 'loading' | 'setup' | 'share' | 'pin' | 'threshold' | 'entering' | 'hall'
 
 const SLUG_RE = /^\/m\/([a-z0-9-]+)(\/)?$/
 
@@ -36,6 +38,7 @@ export default function App() {
   const [isPublic, setIsPublic] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
+  const [shareUrl, setShareUrl] = useState<string | null>(null)
 
   // Detect public share URL: /m/<slug>
   useEffect(() => {
@@ -51,7 +54,7 @@ export default function App() {
       const saved = await loadProfileBySlug(slug)
       if (saved) {
         setProfile(saved)
-        setPhase('threshold')
+        setPhase('pin')
       } else {
         setPhase('setup')
       }
@@ -139,6 +142,18 @@ export default function App() {
     setPhase('entering')
   }, [engine, profile, startMusic])
 
+  const handleShareEnter = useCallback(() => {
+    if (!profile) return
+    setPhase('threshold')
+  }, [profile])
+
+  const handlePinUnlock = useCallback(() => {
+    if (!profile) return
+    engine.arm()
+    engine.ensureUnlocked?.()
+    setPhase('threshold')
+  }, [engine, profile])
+
   const handleAuthenticate = useCallback(() => {
     setPhase('setup')
   }, [])
@@ -165,7 +180,9 @@ export default function App() {
         if (result) {
           const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId: '' }
           setProfile(saved)
-          setPhase(saved.photos.length ? 'threshold' : 'setup')
+          const url = `${window.location.origin}/m/${saved.slug}`
+          setShareUrl(url)
+          setPhase('share')
           return
         }
       } catch (err) {
@@ -238,7 +255,9 @@ export default function App() {
         })
 
         setProfile(finalProfile)
-        setPhase(finalProfile.photos.length ? 'threshold' : 'setup')
+        const url = `${window.location.origin}/m/${finalProfile.slug}`
+        setShareUrl(url)
+        setPhase('share')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Save failed')
       }
@@ -305,6 +324,40 @@ export default function App() {
               onReset={handleReset}
               onSignOut={handleSignOut}
               isPublic={isPublic}
+            />
+          </motion.div>
+        ) : null}
+
+        {phase === 'share' && profile && shareUrl ? (
+          <motion.div
+            key="share"
+            className="app__screen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <ShareScreen
+              profile={profile}
+              shareUrl={shareUrl}
+              onEnter={handleShareEnter}
+              onEdit={handleEdit}
+            />
+          </motion.div>
+        ) : null}
+
+        {phase === 'pin' && profile ? (
+          <motion.div
+            key="pin"
+            className="app__screen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <PinScreen
+              profile={profile}
+              onUnlock={handlePinUnlock}
             />
           </motion.div>
         ) : null}

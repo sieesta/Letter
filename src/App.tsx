@@ -9,7 +9,7 @@ import { ThresholdScreen } from './components/ThresholdScreen'
 import { EnterSequence } from './components/EnterSequence'
 import { Hallway } from './components/hall/Hallway'
 import { MusicDock } from './components/MusicDock'
-import { supabase } from './lib/supabase'
+import { getStoredSession, getStoredUser, setCurrentSessionState } from './lib/supabase'
 import { DesktopModeGate } from './components/DesktopModeGate'
 import { AuthScreen } from './components/AuthScreen'
 import { ShareScreen } from './components/ShareScreen'
@@ -63,19 +63,16 @@ export default function App() {
     }
   }, [])
 
-  // Check for existing session on load
+  // Check for existing session on load (persisted in localStorage)
   useEffect(() => {
     let alive = true
     const init = async () => {
       try {
-        const { data } = await supabase.auth.getSession()
-        const session = data?.session ?? null
-        if (session && session.access_token) {
-          // Logged in — go to setup (or public view if /m/:slug)
-          const { data: userData } = await supabase.auth.getUser()
-          if (userData?.user?.id) {
-            setUserId(userData.user.id)
-          }
+        const stored = getStoredSession()
+        const storedUser = getStoredUser()
+        if (stored && stored.access_token && storedUser && storedUser.id) {
+          setCurrentSessionState(stored)
+          setUserId(storedUser.id)
           setPhase('setup')
           return
         }

@@ -59,11 +59,63 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   console.warn('[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY not set — Supabase calls will fail')
 }
 
-/** Current session, set by auth methods. Used for Authorization headers. */
+/** Current session, persisted in localStorage so it survives page reloads. */
 let currentSession: { access_token: string } | null = null
+/** Current user, persisted in localStorage so it survives page reloads. */
+let currentUser: { id: string } | null = null
 
-function setSession(session: { access_token: string } | null) {
+function loadStoredSession(): { access_token: string } | null {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const raw = localStorage.getItem('memoryLaneSession')
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed && parsed.access_token) return parsed
+    return null
+  } catch {
+    return null
+  }
+}
+
+function loadStoredUser(): { id: string } | null {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const raw = localStorage.getItem('memoryLaneUser')
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed && parsed.id) return parsed
+    return null
+  } catch {
+    return null
+  }
+}
+
+function storeSession(session: { access_token: string } | null) {
   currentSession = session
+  if (typeof localStorage === 'undefined') return
+  try {
+    if (session) {
+      localStorage.setItem('memoryLaneSession', JSON.stringify(session))
+    } else {
+      localStorage.removeItem('memoryLaneSession')
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function storeUser(user: { id: string } | null) {
+  currentUser = user
+  if (typeof localStorage === 'undefined') return
+  try {
+    if (user) {
+      localStorage.setItem('memoryLaneUser', JSON.stringify(user))
+    } else {
+      localStorage.removeItem('memoryLaneUser')
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 function authHeaders(): Record<string, string> {
@@ -73,6 +125,12 @@ function authHeaders(): Record<string, string> {
   }
 }
 
+function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
 async function request(
   method: string,
   path: string,
@@ -80,7 +138,7 @@ async function request(
 ): Promise<{ data: any[] | null; error: Error | null }> {
   const url = `${SUPABASE_URL}/rest/v1${path}`
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -89,7 +147,7 @@ async function request(
         ...authHeaders(),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
-    })
+    }, 15000)
     if (!response.ok) {
       let message = `Supabase error ${response.status}`
       try {
@@ -158,7 +216,7 @@ function storageFrom(bucket: string): SupabaseStorage {
   return {
     upload: async (path: string, file: File, opts: { cacheControl?: string; contentType?: string } = {}) => {
       const fullPath = `${bucket}/${path}`
-      const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${fullPath}`, {
+      const response = await fetchWithTimeout(`${SUPABASE_URL}/storage/v1/object/${fullPath}`, {
         method: 'POST',
         headers: {
           apikey: SUPABASE_ANON_KEY ?? '',
@@ -167,7 +225,7 @@ function storageFrom(bucket: string): SupabaseStorage {
           ...(opts.contentType ? { 'Content-Type': opts.contentType } : {}),
         },
         body: file,
-      })
+      }, 30000)
       if (!response.ok) {
         let message = `Storage upload failed ${response.status}`
         try {
@@ -189,7 +247,7 @@ function storageFrom(bucket: string): SupabaseStorage {
       }
     },
     remove: async (paths: string[]) => {
-      const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}`, {
+      const response = await fetchWithTimeout(`${SUPABASE_URL}/storage/v1/object/${bucket}`, {
         method: 'DELETE',
         headers: {
           apikey: SUPABASE_ANON_KEY ?? '',
@@ -197,7 +255,7 @@ function storageFrom(bucket: string): SupabaseStorage {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(paths),
-      })
+      }, 15000)
       if (!response.ok) return { error: new Error(`Storage remove failed ${response.status}`) }
       return { error: null }
     },
@@ -219,7 +277,7 @@ function notify(event: string) {
 export const supabase: SupabaseClient = {
   auth: {
     signUp: async ({ email, password }) => {
-      const response = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+      const response = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/signup`, {
         method: 'POST',
         headers: {
           apikey: SUPABASE_ANON_KEY ?? '',
@@ -227,7 +285,7 @@ export const supabase: SupabaseClient = {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email, password }),
-      })
+      }, 15000)
       if (!response.ok) {
         let message = `Sign up failed ${response.status}`
         try {
@@ -241,12 +299,14 @@ export const supabase: SupabaseClient = {
       const json = await response.json()
       state.user = { id: json.user?.id || json.id || '' }
       state.session = { access_token: json.access_token ?? '' }
-      setSession(state.session)
+      storeSession(state.session)
+      storeUser(state.user)
+      currentSession = state.session
       notify('SIGNED_UP')
       return { data: { user: state.user, session: state.session }, error: null }
     },
     signInWithPassword: async ({ email, password }) => {
-      const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      const response = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: {
           apikey: SUPABASE_ANON_KEY ?? '',
@@ -254,7 +314,7 @@ export const supabase: SupabaseClient = {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email, password }),
-      })
+      }, 15000)
       if (!response.ok) {
         let message = `Sign in failed ${response.status}`
         try {
@@ -268,18 +328,22 @@ export const supabase: SupabaseClient = {
       const json = await response.json()
       state.user = { id: json.user?.id || json.id || '' }
       state.session = { access_token: json.access_token ?? '' }
-      setSession(state.session)
+      storeSession(state.session)
+      storeUser(state.user)
+      currentSession = state.session
       notify('SIGNED_IN')
       return { data: { user: state.user, session: state.session }, error: null }
     },
     signOut: async () => {
-      await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+      await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/logout`, {
         method: 'POST',
         headers: authHeaders(),
-      })
+      }, 15000)
       state.user = null
       state.session = null
-      setSession(null)
+      storeSession(null)
+      storeUser(null)
+      currentSession = null
       notify('SIGNED_OUT')
       return { error: null }
     },
@@ -296,4 +360,38 @@ export const supabase: SupabaseClient = {
   },
   from: makeQuery,
   storage: { from: storageFrom },
+}
+
+/** Restore persisted session from localStorage. Returns the session or null. */
+export function getStoredSession(): { access_token: string } | null {
+  return loadStoredSession()
+}
+
+/** Get the current session object (may be null). */
+export function getCurrentSessionState(): { access_token: string } | null {
+  return currentSession
+}
+
+/** Set the current session and persist to localStorage. */
+export function setCurrentSessionState(session: { access_token: string } | null) {
+  currentSession = session
+  storeSession(session)
+  if (session) {
+    state.session = session
+  }
+  const storedUser = loadStoredUser()
+  if (storedUser) {
+    currentUser = storedUser
+    state.user = storedUser
+  }
+}
+
+/** Get the stored user from localStorage. Returns the user or null. */
+export function getStoredUser(): { id: string } | null {
+  return loadStoredUser()
+}
+
+/** Get the current user object (may be null). */
+export function getCurrentUserState(): { id: string } | null {
+  return currentUser
 }

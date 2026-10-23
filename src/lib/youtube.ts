@@ -148,28 +148,26 @@ const CLIENTS: ClientProfile[] = [
 
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/
 
-/** Pull an 11 character video id out of any YouTube link shape. */
+/** Pull an 11 character video id out of any YouTube link shape.
+ *
+ * Only accepts actual YouTube URLs (youtube.com, youtu.be, youtube-nocookie.com).
+ * Random text is not treated as a video id.
+ */
 export function extractVideoId(input: string): string | null {
   const raw = (input || '').trim()
   if (!raw) return null
-
-  if (VIDEO_ID_RE.test(raw)) return raw
 
   let url: URL
   try {
     url = new URL(raw.includes('://') ? raw : `https://${raw}`)
   } catch {
-    const loose = raw.match(/[A-Za-z0-9_-]{11}/)
-    return loose ? loose[0] : null
+    return null
   }
 
   const host = url.hostname.replace(/^www\./, '').toLowerCase()
   const isYouTube = host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com') || host.endsWith('youtu.be')
 
-  if (!isYouTube) {
-    const loose = raw.match(/[A-Za-z0-9_-]{11}/)
-    return loose && /v=|youtu/.test(raw) ? loose[0] : null
-  }
+  if (!isYouTube) return null
 
   const fromQuery = url.searchParams.get('v')
   if (fromQuery && VIDEO_ID_RE.test(fromQuery)) return fromQuery
@@ -185,8 +183,7 @@ export function extractVideoId(input: string): string | null {
     return segments[0]
   }
 
-  const loose = raw.match(/[A-Za-z0-9_-]{11}/)
-  return loose ? loose[0] : null
+  return null
 }
 
 interface RawFormat {

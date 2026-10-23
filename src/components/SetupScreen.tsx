@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from 'framer-motion'
 import type { MemoryPhoto, MuseumProfile } from '../types'
 import { EMPTY_PROFILE } from '../types'
 import { extractVideoId } from '../lib/youtube'
-import { makeSlug } from '../lib/supabaseService'
 
 function makeId(): string {
   return Math.random().toString(36).slice(2, 10)
@@ -137,11 +136,6 @@ export function SetupScreen({
     }
   }
 
-  const handleGenerateSlug = () => {
-    const slug = makeSlug(draft.herName, draft.hallTitle)
-    update({ slug })
-  }
-
   return (
     <div className="setup">
       <motion.form
@@ -185,35 +179,16 @@ export function SetupScreen({
               />
             </label>
             {!isPublic && (
-              <>
-                <label className="setup__field">
-                  <span>Share link (slug)</span>
-                  <input
-                    type="text"
-                    value={draft.slug}
-                    onChange={(event) => update({ slug: event.target.value })}
-                    placeholder="memory-lane-maya"
-                  />
-                  <button
-                    type="button"
-                    className="setup__ghostButton"
-                    onClick={handleGenerateSlug}
-                    style={{ marginTop: 0.5, fontSize: 0.75 }}
-                  >
-                    Generate link
-                  </button>
-                </label>
-                <label className="setup__field">
-                  <span>4-digit PIN (your girlfriend will enter this)</span>
-                  <input
-                    type="text"
-                    value={draft.pin}
-                    maxLength={4}
-                    onChange={(event) => update({ pin: event.target.value.replace(/\D/g, '').slice(0, 4) })}
-                    placeholder="1234"
-                  />
-                </label>
-              </>
+              <label className="setup__field">
+                <span>4-digit PIN (your girlfriend will enter this)</span>
+                <input
+                  type="text"
+                  value={draft.pin}
+                  maxLength={4}
+                  onChange={(event) => update({ pin: event.target.value.replace(/\D/g, '').slice(0, 4) })}
+                  placeholder="1234"
+                />
+              </label>
             )}
           </div>
         </section>

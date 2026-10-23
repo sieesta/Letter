@@ -58,10 +58,10 @@ export default function App() {
         setProfile(saved)
         setPhase('pin')
       } else {
-        setPhase('setup')
+        setError('Hallway not found. The link may be invalid.')
       }
     } catch {
-      setPhase('setup')
+      setError('Could not load the hallway. Please check the link and try again.')
     }
   }, [])
 
@@ -149,8 +149,9 @@ export default function App() {
     if (!profile) return
     engine.arm()
     engine.ensureUnlocked?.()
-    setPhase('threshold')
-  }, [engine, profile])
+    startMusic(profile)
+    setPhase('hall')
+  }, [engine, profile, startMusic])
 
   const handleAuthenticate = useCallback(async (newUserId: string) => {
     setUserId(newUserId)
@@ -178,36 +179,17 @@ export default function App() {
       try {
         if (!userId) throw new Error('Not signed in')
 
-        const result = await Promise.race([
-          supabaseSaveProfile(userId, { ...next, slug: next.slug || '' }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Save timed out')), 20000),
-          ),
-        ])
+        const result = await supabaseSaveProfile(userId, { ...next, slug: next.slug || '' })
 
-        if (result) {
-          const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId: userId ?? undefined }
-          setProfile(saved)
-          const url = `${window.location.origin}/m/${saved.slug}`
-          setShareUrl(url)
-          setPhase('share')
-          return
-        }
-        // Supabase returned no result — still proceed with local fallback
-        const slug = (next.slug ? next.slug : makeSlug(next.herName, next.hallTitle)) as string
-        const localProfile: MuseumProfile = { ...next, id: 'local-' + Date.now(), slug, userId: userId ?? undefined }
-        setProfile(localProfile)
-        const url = `${window.location.origin}/m/${slug}`
+        if (!result) throw new Error('Save returned no result')
+
+        const saved: MuseumProfile = { ...next, id: result.id, slug: result.slug, userId: userId ?? undefined }
+        setProfile(saved)
+        const url = `${window.location.origin}/m/${saved.slug}`
         setShareUrl(url)
         setPhase('share')
       } catch (err) {
-        // Even on error, proceed to share screen with local fallback
-        const slug = (next.slug ? next.slug : makeSlug(next.herName, next.hallTitle)) as string
-        const localProfile: MuseumProfile = { ...next, id: 'local-' + Date.now(), slug, userId: userId ?? undefined }
-        setProfile(localProfile)
-        const url = `${window.location.origin}/m/${slug}`
-        setShareUrl(url)
-        setPhase('share')
+        setError(err instanceof Error ? err.message : 'Save failed. Please try again.')
       }
     },
     [userId],
@@ -228,21 +210,8 @@ export default function App() {
 
       try {
         // Save profile first to get an id
-        const result = await Promise.race([
-          supabaseSaveProfile(userId, { ...next, slug }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Save timed out')), 20000),
-          ),
-        ])
-        if (!result) {
-          // Supabase failed — proceed with local fallback
-          const localProfile: MuseumProfile = { ...next, id: 'local-' + Date.now(), slug, userId: userId ?? undefined }
-          setProfile(localProfile)
-          const url = `${window.location.origin}/m/${slug}`
-          setShareUrl(url)
-          setPhase('share')
-          return
-        }
+        const result = await supabaseSaveProfile(userId, { ...next, slug })
+        if (!result) throw new Error('Save returned no result')
         const profileId = result.id
 
         // Upload only new photos (those with File objects) to Supabase Storage
@@ -252,14 +221,8 @@ export default function App() {
         for (let i = 0; i < newPhotoFiles.length; i++) {
           const file = newPhotoFiles[i]
           try {
-            const uploaded = await Promise.race([
-              uploadPhoto('', profileId, file),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Upload timed out')), 30000),
-              ),
-            ])
+            const uploaded = await uploadPhoto('', profileId, file)
             if (uploaded) {
-              // Find the matching photo in draft to preserve caption/date
               const draftPhoto = (next.photos as any[]).find((p: any) => p.file === file)
               const photo: MemoryPhoto = {
                 id: crypto.randomUUID(),
@@ -286,12 +249,7 @@ export default function App() {
         let audioFileName = next.audioFileName
         if (audioFile) {
           try {
-            const uploaded = await Promise.race([
-              uploadAudio('', profileId, audioFile),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Upload timed out')), 30000),
-              ),
-            ])
+            const uploaded = await uploadAudio('', profileId, audioFile)
             if (uploaded) {
               audioUrl = uploaded.publicUrl
               audioFileName = audioFile.name
@@ -308,7 +266,6 @@ export default function App() {
           userId: userId ?? undefined,
           audioKey: audioUrl,
           audioFileName,
-        // All photos: existing ones without file + newly uploaded ones with public URLs
           photos: [
             ...((next.photos as any[])
               .filter((p: any) => !p.file)
@@ -318,9 +275,8 @@ export default function App() {
           updatedAt: Date.now(),
         }
 
-        // Persist ALL photos to Supabase: delete existing, then insert fresh with storage_path + captions/dates
+        // Persist ALL photos to Supabase
         const allDbPhotos = [
-          // Existing photos already in storage
           ...((next.photos as any[])
             .filter((p: any) => !p.file && p.storage_path)
             .map((p: any, index) => ({
@@ -330,41 +286,25 @@ export default function App() {
               date: p.date || null,
               sort_order: index,
             }))),
-          // Newly uploaded photos
           ...newDbPhotos,
         ]
         try {
-          await Promise.race([
-            supabase.from('photos').delete().eq('profile_id', profileId),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Save timed out')), 20000),
-            ),
-          ])
+          await supabase.from('photos').delete().eq('profile_id', profileId)
         } catch {
           /* best effort — continue */
         }
         if (allDbPhotos.length > 0) {
           try {
-            await Promise.race([
-              supabase.from('photos').insert(allDbPhotos),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Save timed out')), 20000),
-              ),
-            ])
+            await supabase.from('photos').insert(allDbPhotos)
           } catch {
             /* best effort — continue */
           }
         }
         try {
-          await Promise.race([
-            updateProfile(profileId, {
-              audioKey: audioUrl,
-              audioFileName,
-            }),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Save timed out')), 20000),
-            ),
-          ])
+          await updateProfile(profileId, {
+            audioKey: audioUrl,
+            audioFileName,
+          })
         } catch {
           /* best effort — continue */
         }
@@ -374,12 +314,7 @@ export default function App() {
         setShareUrl(url)
         setPhase('share')
       } catch (err) {
-        // Even on error, proceed to share screen with local fallback
-        const localProfile: MuseumProfile = { ...next, id: 'local-' + Date.now(), slug, userId: userId ?? undefined }
-        setProfile(localProfile)
-        const url = `${window.location.origin}/m/${slug}`
-        setShareUrl(url)
-        setPhase('share')
+        setError(err instanceof Error ? err.message : 'Save failed. Please try again.')
       }
     },
     [userId],

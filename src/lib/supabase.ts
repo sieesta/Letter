@@ -54,10 +54,15 @@ export interface SupabaseStorage {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  // eslint-disable-next-line no-console
-  console.warn('[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY not set — Supabase calls will fail')
+function requireSupabaseEnv(): void {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error(
+      '[supabase] Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your Vercel project environment variables (Settings → Environment Variables). These are Vite env vars and must be prefixed with VITE_.',
+    )
+  }
 }
+
+requireSupabaseEnv()
 
 /** Current session, persisted in localStorage so it survives page reloads. */
 let currentSession: { access_token: string } | null = null
@@ -136,6 +141,7 @@ async function request(
   path: string,
   body?: unknown,
 ): Promise<{ data: any[] | null; error: Error | null }> {
+  requireSupabaseEnv()
   const url = `${SUPABASE_URL}/rest/v1${path}`
   try {
     const response = await fetchWithTimeout(url, {
@@ -282,6 +288,7 @@ function notify(event: string) {
 export const supabase: SupabaseClient = {
   auth: {
     signUp: async ({ email, password }) => {
+      requireSupabaseEnv()
       const response = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/signup`, {
         method: 'POST',
         headers: {
@@ -311,6 +318,7 @@ export const supabase: SupabaseClient = {
       return { data: { user: state.user, session: state.session }, error: null }
     },
     signInWithPassword: async ({ email, password }) => {
+      requireSupabaseEnv()
       const response = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: {

@@ -132,10 +132,29 @@ export async function saveProfile(
     .single()
 
   if (error) {
-    if (error.message.includes('duplicate') || error.message.includes('unique')) {
-      return saveProfile(userId, { ...profile, slug: makeSlug(profile.herName, profile.hallTitle) })
+    const message = String(error.message ?? '').toLowerCase();
+    const isDuplicateOrUnique =
+      message.includes('duplicate') || message.includes('unique');
+
+    if (isDuplicateOrUnique) {
+      return saveProfile(userId, { ...profile, slug: makeSlug(profile.herName, profile.hallTitle) });
     }
-    throw error
+
+    const isRlsViolation =
+      message.includes('row-level security') ||
+      message.includes('row level security') ||
+      message.includes('rls') ||
+      message.includes('policy') ||
+      message.includes('auth.uid') ||
+      message.includes('new row violates');
+
+    if (isRlsViolation) {
+      throw new Error(
+        'Profile save failed: row-level security policy rejected the insert. Make sure you are signed in and the session belongs to the user creating this profile. If you just signed up or signed in, try refreshing the page and signing in again.',
+      );
+    }
+
+    throw new Error(`Profile save failed (insert): ${error.message}`);
   }
 
   const created = data as { id: string; slug: string } | null
